@@ -1,0 +1,8 @@
+colorama
+regex
+dbus-python
+requests
+soundfile
+sounddevice
+typer
+
