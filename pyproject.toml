@@ -50,7 +50,8 @@ Repository = "https://github.com/karst3nz/terminal_lyrics"
 Issues = "https://github.com/karst3nz/terminal_lyrics/issues"
 
 [tool.setuptools]
-packages = ["terminal_lyrics"]
+# Автоматически находить все пакеты и подпакеты
+packages = {find = {}}
 
 [tool.setuptools.package-data]
 terminal_lyrics = ["py.typed"]
