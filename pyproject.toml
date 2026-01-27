@@ -1,0 +1,68 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "terminal-lyrics"
+version = "0.1.0"
+description = "Display synchronized lyrics in your terminal, fetched automatically for the song playing in your MPRIS-compatible music player"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "karst3nz"}
+]
+keywords = ["lyrics", "terminal", "mpris", "music", "lrc", "synchronized"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Sound/Audio",
+    "Topic :: Utilities",
+]
+
+dependencies = [
+    "colorama",
+    "regex",
+    "dbus-python",
+    "requests",
+    "typer",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "black",
+    "ruff",
+    "mypy",
+]
+
+[project.scripts]
+terminal-lyrics = "terminal_lyrics.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/karst3nz/terminal_lyrics"
+Repository = "https://github.com/karst3nz/terminal_lyrics"
+Issues = "https://github.com/karst3nz/terminal_lyrics/issues"
+
+[tool.setuptools]
+packages = ["terminal_lyrics"]
+
+[tool.setuptools.package-data]
+terminal_lyrics = ["py.typed"]
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
