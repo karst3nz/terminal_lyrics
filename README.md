@@ -15,6 +15,10 @@ Display synchronized lyrics in your terminal, fetched automatically for the song
 *   **Powerful CLI**: A command-line interface to watch lyrics, manage the cache, search for lyrics, and convert lyric formats.
 *   **Configurable**: Customize behavior through environment variables.
 
+## Example
+
+![Example of terminal-lyrics in action](example_video/123.webp)
+
 ## Installation
 
 1.  **Prerequisites**: This tool is designed for Linux systems with a D-Bus session bus. You will need Python 3 and the system dependencies for `dbus-python`. On Debian/Ubuntu, you can install them with:
