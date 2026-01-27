@@ -24,21 +24,9 @@ Display synchronized lyrics in your terminal, fetched automatically for the song
 
 ## Installation
 
-1.  **Prerequisites**: This tool is designed for Linux systems with a D-Bus session bus. You will need Python 3 and the system dependencies for `dbus-python`. On Debian/Ubuntu, you can install them with:
-    ```bash
-    sudo apt-get install python3-dev libdbus-1-dev
-    ```
-
-2.  **Clone the repository**:
-    ```bash
-    git clone https://github.com/karst3nz/terminal_lyrics.git
-    cd terminal_lyrics
-    ```
-
-3.  **Install Python dependencies**:
-    ```bash
-    pip install -r requirements.txt
-    ```
+```bash
+pip install git+https://github.com/karst3nz/terminal_lyrics.git
+```
 
 ## Usage
 
