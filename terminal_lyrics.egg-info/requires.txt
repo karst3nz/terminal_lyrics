@@ -1,0 +1,11 @@
+colorama
+regex
+dbus-python
+requests
+typer
+
+[dev]
+pytest
+black
+ruff
+mypy
