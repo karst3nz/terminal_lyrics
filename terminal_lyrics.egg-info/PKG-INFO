@@ -2,6 +2,7 @@ Metadata-Version: 2.4
 Name: terminal-lyrics
 Version: 0.1.0
 Summary: Display synchronized lyrics in your terminal, fetched automatically for the song playing in your MPRIS-compatible music player
+Home-page: https://github.com/karst3nz/terminal_lyrics
 Author: karst3nz
 License: MIT
 Project-URL: Homepage, https://github.com/karst3nz/terminal_lyrics
@@ -29,6 +30,8 @@ Requires-Dist: pytest; extra == "dev"
 Requires-Dist: black; extra == "dev"
 Requires-Dist: ruff; extra == "dev"
 Requires-Dist: mypy; extra == "dev"
+Dynamic: home-page
+Dynamic: requires-python
 
 # terminal_lyrics
 
@@ -38,6 +41,8 @@ Display synchronized lyrics in your terminal, fetched automatically for the song
 
 **Tested on CachyOS (ArchLinux)**
 ![fastfetch](example_video/tested_on.png)
+
+**Thanks to [LRCLIB](https://lrclib.net/) for free public API! <3**
 
 ## Features
 
@@ -56,21 +61,9 @@ Display synchronized lyrics in your terminal, fetched automatically for the song
 
 ## Installation
 
-1.  **Prerequisites**: This tool is designed for Linux systems with a D-Bus session bus. You will need Python 3 and the system dependencies for `dbus-python`. On Debian/Ubuntu, you can install them with:
-    ```bash
-    sudo apt-get install python3-dev libdbus-1-dev
-    ```
-
-2.  **Clone the repository**:
-    ```bash
-    git clone https://github.com/karst3nz/terminal_lyrics.git
-    cd terminal_lyrics
-    ```
-
-3.  **Install Python dependencies**:
-    ```bash
-    pip install -r requirements.txt
-    ```
+```bash
+pip install git+https://github.com/karst3nz/terminal_lyrics.git
+```
 
 ## Usage
 

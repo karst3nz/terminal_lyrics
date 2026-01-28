@@ -153,7 +153,7 @@ def search(
         for i, r in enumerate(results, 1):
             synced = "✓" if r.has_synced_lyrics else "✗"
             plain = "✓" if r.has_plain_lyrics else "✗"
-            duration_str = f"{r.duration // 60}:{r.duration % 60:02d}" if r.duration else "?"
+            duration_str = f"{r.duration // 60}:{r.duration % 60}" if r.duration else "?"
             inst_str = " [instrumental]" if r.instrumental else ""
             typer.echo(
                 f"{i}. {r.artist_name} - {r.track_name}"
