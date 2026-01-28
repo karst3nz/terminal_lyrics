@@ -42,8 +42,14 @@ class MprisClient:
 
     @staticmethod
     def list_players() -> list[str]:
-        bus = dbus.SessionBus()
-        return [s for s in bus.list_names() if s.startswith("org.mpris.MediaPlayer2.")]
+        try:
+            bus = dbus.SessionBus()
+            return [s for s in bus.list_names() if s.startswith("org.mpris.MediaPlayer2.")]
+        except dbus.DBusException as e:
+            # In restricted environments (tests/sandbox/CI), connecting to the
+            # session bus can fail (e.g. AccessDenied). Treat as "no players".
+            logger.debug("Unable to connect to D-Bus session bus: %s", e)
+            return []
 
     @staticmethod
     def pick_player(preferred: str | None = None) -> "MprisClient":

@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import Any
 import time
 
-from terminal_lyrics.mpris.client import MprisClient, TrackInfo
-from terminal_lyrics.mpris.errors import NoPlayersFound, PlayerUnavailable
+from terminal_lyrics.mpris.client import TrackInfo
+from terminal_lyrics.mpris.errors import NoPlayersFound
 
 
-@dataclass
 class MockMprisClient:
     """
     Mock MPRIS client for testing.
@@ -19,31 +17,36 @@ class MockMprisClient:
     - position_ms: current position (can be auto-incremented)
     """
     
-    service_name: str = "org.mpris.MediaPlayer2.mock"
-    playback_status: str = "Playing"
-    metadata: dict[str, Any] = field(default_factory=dict)
-    position_ms: int = 0
-    auto_advance: bool = False
-    auto_advance_rate_ms_per_sec: float = 1000.0  # 1 second per real second
-    
-    _start_time: float | None = None
-    
-    def __post_init__(self):
-        if not self.metadata:
-            self.metadata = {
-                "xesam:title": "Test Track",
-                "xesam:artist": ["Test Artist"],
-                "xesam:album": "Test Album",
-                "xesam:url": "file:///test.mp3",
-                "mpris:trackid": "/org/mpris/MediaPlayer2/Track/1",
-            }
+    def __init__(
+        self,
+        service_name: str = "org.mpris.MediaPlayer2.mock",
+        playback_status: str = "Playing",
+        metadata: dict[str, Any] | None = None,
+        position_ms: int = 0,
+        auto_advance: bool = False,
+        auto_advance_rate_ms_per_sec: float = 1000.0,
+    ):
+        self.service_name = service_name
+        self.auto_advance = auto_advance
+        self.auto_advance_rate_ms_per_sec = float(auto_advance_rate_ms_per_sec)
+
+        self._start_time: float | None = None
+        self._playback_status = playback_status
+        self._position_ms = int(position_ms)
+        self._metadata: dict[str, Any] = dict(metadata) if metadata else {
+            "xesam:title": "Test Track",
+            "xesam:artist": ["Test Artist"],
+            "xesam:album": "Test Album",
+            "xesam:url": "file:///test.mp3",
+            "mpris:trackid": "/org/mpris/MediaPlayer2/Track/1",
+        }
     
     def _update_position(self) -> None:
-        if self.auto_advance and self.playback_status.lower() == "playing":
+        if self.auto_advance and self._playback_status.lower() == "playing":
             if self._start_time is None:
                 self._start_time = time.time()
             elapsed = time.time() - self._start_time
-            self.position_ms = int(elapsed * self.auto_advance_rate_ms_per_sec)
+            self._position_ms = int(elapsed * self.auto_advance_rate_ms_per_sec)
     
     @staticmethod
     def list_players() -> list[str]:
@@ -56,14 +59,14 @@ class MockMprisClient:
         return MockMprisClient()
     
     def playback_status(self) -> str:
-        return self.playback_status
+        return self._playback_status
     
     def metadata(self) -> dict[str, Any]:
-        return self.metadata.copy()
+        return self._metadata.copy()
     
     def position_ms(self) -> int:
         self._update_position()
-        return self.position_ms
+        return self._position_ms
     
     def track_info(self) -> TrackInfo:
         md = self.metadata()
@@ -85,26 +88,26 @@ class MockMprisClient:
             artist_list = [artist]
         else:
             artist_list = artist
-        self.metadata.update({
+        self._metadata.update({
             "xesam:title": title,
             "xesam:artist": artist_list,
             "xesam:album": album,
-            "mpris:trackid": f"/org/mpris/MediaPlayer2/Track/{hash((title, artist, album))}",
+            "mpris:trackid": f"/org/mpris/MediaPlayer2/Track/{hash((title, tuple(artist_list), album))}",
         })
     
     def seek(self, position_ms: int) -> None:
         """Seek to position."""
-        self.position_ms = max(0, position_ms)
+        self._position_ms = max(0, int(position_ms))
         self._start_time = time.time() - (position_ms / self.auto_advance_rate_ms_per_sec)
     
     def pause(self) -> None:
         """Pause playback."""
         self._update_position()
-        self.playback_status = "Paused"
+        self._playback_status = "Paused"
     
     def play(self) -> None:
         """Resume playback."""
         self._update_position()
-        self.playback_status = "Playing"
+        self._playback_status = "Playing"
         if self._start_time is None:
-            self._start_time = time.time() - (self.position_ms / self.auto_advance_rate_ms_per_sec)
+            self._start_time = time.time() - (self._position_ms / self.auto_advance_rate_ms_per_sec)

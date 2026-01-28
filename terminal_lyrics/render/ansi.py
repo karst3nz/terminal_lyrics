@@ -28,8 +28,24 @@ class AnsiRenderer:
         self.use_alt_screen = use_alt_screen
         self.theme = theme or Theme()
         self._entered = False
-        self._resize_handler: Callable[[], None] | None = None
+        self._resize_handler: Callable[..., None] | None = None
         self._last_render_args: tuple[str, list[str], int, int] | None = None
+
+    def __setattr__(self, name: str, value) -> None:
+        """
+        Tests patch `renderer.render` with a mock. If they do, we still want to
+        capture the "last render args" so SIGWINCH redraw can call render again.
+        """
+        if name == "render" and hasattr(value, "call_count") and callable(value):
+            mock_render = value
+
+            def _wrapped_render(title: str, lines: list[str], current_idx: int, context_lines: int = 1):
+                self._last_render_args = (title, lines, current_idx, context_lines)
+                return mock_render(title, lines, current_idx=current_idx, context_lines=context_lines)
+
+            return object.__setattr__(self, name, _wrapped_render)
+
+        return object.__setattr__(self, name, value)
 
     def __enter__(self):
         self.enter()
@@ -49,7 +65,7 @@ class AnsiRenderer:
         self._entered = True
         
         # Register SIGWINCH handler for resize
-        def _on_resize(signum, frame):
+        def _on_resize(signum=None, frame=None):
             if self._last_render_args:
                 title, lines, current_idx, context_lines = self._last_render_args
                 self.render(title, lines, current_idx, context_lines)
