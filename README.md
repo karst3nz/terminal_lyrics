@@ -7,6 +7,8 @@ Display synchronized lyrics in your terminal, fetched automatically for the song
 **Tested on CachyOS (ArchLinux)**
 ![fastfetch](example_video/tested_on.png)
 
+**Thanks to [LRCLIB](https://lrclib.net/) for free public API! <3**
+
 ## Features
 
 *   **Synchronized Lyrics Display**: Shows LRC format lyrics that scroll in time with your music.
