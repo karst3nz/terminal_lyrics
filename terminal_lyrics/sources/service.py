@@ -57,8 +57,9 @@ class LyricsService:
         cached_text, cached_has = self.cache.get(key)
         if cached_has is True and cached_text is not None:
             return LyricsResponse(lrc_text=cached_text, source="cache", has_lyrics=True)
+        # При has_lyrics=False в кэше — всё равно проверяем источники (лирики могли появиться)
         if cached_has is False:
-            return LyricsResponse(lrc_text=None, source="cache", has_lyrics=False)
+            logger.debug("Кэш: has_lyrics=0 для %s, проверяем источники", track.display)
 
         # Fetch sources in order; if any says "definitive_not_found", we still try others
         # (because some sources may have synced lyrics while others don't).
@@ -97,12 +98,24 @@ class LyricsService:
 
     def _auto_search_fallback(self, track: TrackKey) -> list[SearchResult]:
         """Автоматический поиск при отсутствии точного совпадения."""
-        # Пробуем поиск по комбинации artist + title
         query = f"{track.artist} {track.title}".strip()
         if not query:
             return []
-        
+
         results = self.search(q=query, track_name=track.title, artist_name=track.artist)
+
+        # Если нет результатов и исполнителей несколько (через ",") — ищем по каждому
+        if not results and "," in (track.artist or ""):
+            artists = [a.strip() for a in track.artist.split(",") if a.strip()]
+            seen_ids: set[int | None] = set()
+            for artist in artists:
+                sub_query = f"{artist} {track.title}".strip()
+                sub_results = self.search(q=sub_query, track_name=track.title, artist_name=artist)
+                for r in sub_results:
+                    if r.id not in seen_ids:
+                        seen_ids.add(r.id)
+                        results.append(r)
+
         return results
 
     def _find_best_match(self, track: TrackKey, results: list[SearchResult]) -> SearchResult | None:
@@ -110,37 +123,51 @@ class LyricsService:
         if not results:
             return None
 
-        # Приоритет: точное совпадение artist + title, затем по artist, затем по title
-        track_artist_lower = track.artist.lower().strip()
-        track_title_lower = track.title.lower().strip()
+        track_title_lower = (track.title or "").lower().strip()
+        track_artist_lower = (track.artist or "").lower().strip()
+        track_artists = [
+            a.strip().lower() for a in (track.artist or "").split(",") if a.strip()
+        ] or ([track_artist_lower] if track_artist_lower else [])
 
         best_score = -1
         best_result: SearchResult | None = None
 
         for r in results:
             score = 0
-            r_artist_lower = r.artist_name.lower().strip()
-            r_title_lower = r.track_name.lower().strip()
+            r_artist_lower = (r.artist_name or "").lower().strip()
+            r_title_lower = (r.track_name or "").lower().strip()
 
-            # Точное совпадение artist и title
-            if r_artist_lower == track_artist_lower and r_title_lower == track_title_lower:
-                score = 100
-            # Совпадение artist и частичное title
-            elif r_artist_lower == track_artist_lower:
-                score = 50
-            # Совпадение title и частичное artist
-            elif r_title_lower == track_title_lower:
-                score = 30
-            # Частичное совпадение
-            elif track_artist_lower in r_artist_lower or r_artist_lower in track_artist_lower:
-                score = 20
-            elif track_title_lower in r_title_lower or r_title_lower in track_title_lower:
-                score = 10
+            title_exact = r_title_lower == track_title_lower
+            title_partial = bool(
+                track_title_lower
+                and r_title_lower
+                and (track_title_lower in r_title_lower or r_title_lower in track_title_lower)
+            )
 
-            # Бонус за наличие синхронизированных лириков (приоритет)
+            artist_exact_full = r_artist_lower == track_artist_lower
+            artist_one_of = r_artist_lower in track_artists
+            artist_partial = (
+                r_artist_lower in track_artist_lower
+                or track_artist_lower in r_artist_lower
+                or any(
+                    r_artist_lower in ta or ta in r_artist_lower for ta in track_artists
+                )
+            )
+
+            if title_exact:
+                score += 50
+            elif title_partial:
+                score += 15
+
+            if artist_exact_full:
+                score += 50
+            elif artist_one_of:
+                score += 45
+            elif artist_partial:
+                score += 20
+
             if r.has_synced_lyrics:
                 score += 5
-            # Бонус за наличие обычных лириков (если нет синхронизированных)
             elif r.has_plain_lyrics:
                 score += 2
 
