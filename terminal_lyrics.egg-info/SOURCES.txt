@@ -15,6 +15,9 @@ terminal_lyrics.egg-info/requires.txt
 terminal_lyrics.egg-info/top_level.txt
 terminal_lyrics/cache/__init__.py
 terminal_lyrics/cache/sqlite.py
+terminal_lyrics/i18n/__init__.py
+terminal_lyrics/i18n/en.json
+terminal_lyrics/i18n/ru.json
 terminal_lyrics/lrc/__init__.py
 terminal_lyrics/lrc/export.py
 terminal_lyrics/lrc/model.py
@@ -35,6 +38,7 @@ terminal_lyrics/sync/tracker.py
 tests/__init__.py
 tests/test_app_with_mock.py
 tests/test_export.py
+tests/test_i18n_config.py
 tests/test_lyrics_parsing.py
 tests/test_mpris.py
 tests/test_mpris_unit.py

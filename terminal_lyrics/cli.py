@@ -5,7 +5,8 @@ import typer
 
 from terminal_lyrics.app import watch as watch_loop
 from terminal_lyrics.cache.sqlite import LyricsCache
-from terminal_lyrics.config import load_config
+from terminal_lyrics.config import load_config, save_config_lang
+from terminal_lyrics.i18n import set_lang, t
 from terminal_lyrics.logging_setup import setup_logging
 from terminal_lyrics.lrc.export import export_json, export_lrc, export_srt
 from terminal_lyrics.lrc.parse import parse_lrc_with_stats
@@ -24,10 +25,9 @@ def watch(
     no_alt_screen: bool = typer.Option(False, "--no-alt-screen", help="Do not use alternate screen buffer"),
     context_lines: int | None = typer.Option(None, "--context", help="Lines above/below current line"),
 ):
-    """
-    Watch synced lyrics in terminal (tmux/headless friendly).
-    """
+    """Watch synced lyrics in terminal (tmux/headless friendly)."""
     cfg = load_config()
+    set_lang(cfg.lang)
     if refresh_hz is not None:
         cfg = cfg.__class__(**{**cfg.__dict__, "refresh_hz": refresh_hz})
     if context_lines is not None:
@@ -66,6 +66,8 @@ def export(
     out: Path | None = typer.Option(None, "--out", help="Output file (default: stdout)"),
 ):
     """Export LRC to SRT/JSON/LRC (normalized)."""
+    cfg = load_config()
+    set_lang(cfg.lang)
     text = lrc_path.read_text(encoding="utf-8")
     doc, _stats = parse_lrc_with_stats(text)
     fmt_l = fmt.lower()
@@ -76,7 +78,7 @@ def export(
     elif fmt_l == "srt":
         data = export_srt(doc)
     else:
-        raise typer.BadParameter("format must be one of: lrc, srt, json")
+        raise typer.BadParameter(t("format_must_be"))
 
     if out:
         out.write_text(data, encoding="utf-8")
@@ -90,13 +92,13 @@ def cache(
 ):
     """Manage lyrics cache."""
     cfg = load_config()
+    set_lang(cfg.lang)
     cache_db = LyricsCache(cfg.cache_db_path)
-    
     if clear:
         cache_db.clear()
-        typer.echo(f"Cache cleared: {cfg.cache_db_path}")
+        typer.echo(t("cache_cleared", path=str(cfg.cache_db_path)))
     else:
-        typer.echo("Use --clear to clear the cache")
+        typer.echo(t("use_clear_to_clear"))
 
 
 @app.command()
@@ -113,16 +115,17 @@ def search(
     
     At least one of --query or --track must be provided.
     """
+    cfg = load_config()
+    set_lang(cfg.lang)
     if not q and not track:
-        typer.echo("Error: At least one of --query or --track must be provided", err=True)
+        typer.echo(t("search_query_required"), err=True)
         raise typer.Exit(code=1)
 
-    cfg = load_config()
     service = LyricsService(cfg)
     results = service.search(q=q, track_name=track, artist_name=artist, album_name=album)
 
     if not results:
-        typer.echo("No results found")
+        typer.echo(t("no_results_found"))
         return
 
     # Ограничиваем количество результатов
@@ -154,17 +157,36 @@ def search(
             synced = "✓" if r.has_synced_lyrics else "✗"
             plain = "✓" if r.has_plain_lyrics else "✗"
             duration_str = f"{r.duration // 60}:{r.duration % 60}" if r.duration else "?"
-            inst_str = " [instrumental]" if r.instrumental else ""
+            inst_str = t("instrumental") if r.instrumental else ""
             typer.echo(
                 f"{i}. {r.artist_name} - {r.track_name}"
                 f" ({duration_str}){inst_str}"
             )
             if r.album_name:
-                typer.echo(f"   Album: {r.album_name}")
-            typer.echo(f"   Synced: {synced}  Plain: {plain}")
+                typer.echo(f"   {t('album')}: {r.album_name}")
+            typer.echo(f"   {t('synced')}: {synced}  {t('plain')}: {plain}")
             if r.id:
                 typer.echo(f"   ID: {r.id}")
             typer.echo()
+
+
+@app.command()
+def config(
+    lang: str | None = typer.Option(None, "--lang", help="Set language: RU or EN"),
+):
+    """Manage settings (language, etc.)."""
+    cfg = load_config()
+    set_lang(cfg.lang)
+    if lang is not None:
+        lang_upper = lang.upper()
+        if lang_upper not in ("RU", "EN"):
+            typer.echo(t("lang_invalid"), err=True)
+            raise typer.Exit(code=1)
+        save_config_lang(lang_upper)
+        set_lang(lang_upper)
+        typer.echo(t("lang_set", lang=lang_upper))
+    else:
+        typer.echo(t("lang_current", lang=cfg.lang))
 
 
 def main() -> None:

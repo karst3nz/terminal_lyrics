@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from terminal_lyrics.i18n import t
+
 
 @dataclass(frozen=True, slots=True)
 class TrackKey:
@@ -13,7 +15,7 @@ class TrackKey:
     def display(self) -> str:
         if self.artist and self.title:
             return f"{self.artist} - {self.title}"
-        return self.title or self.artist or "Unknown track"
+        return self.title or self.artist or t("unknown_track")
 
 
 @dataclass(frozen=True, slots=True)

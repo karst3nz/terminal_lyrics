@@ -5,6 +5,7 @@ import signal
 import time
 
 from terminal_lyrics.config import AppConfig
+from terminal_lyrics.i18n import set_lang, t
 from terminal_lyrics.lrc.parse import parse_lrc
 from terminal_lyrics.mpris.client import MprisClient
 from terminal_lyrics.mpris.errors import NoPlayersFound, PlayerUnavailable
@@ -21,6 +22,7 @@ def watch(cfg: AppConfig, *, preferred_player: str | None, debug: bool) -> int:
     Main watch loop:
     MPRIS -> (track, position) -> lyrics -> parse -> bisect -> render on change.
     """
+    set_lang(cfg.lang)
     svc = LyricsService(cfg)
 
     renderer = AnsiRenderer(use_alt_screen=cfg.use_alt_screen)
@@ -45,19 +47,19 @@ def watch(cfg: AppConfig, *, preferred_player: str | None, debug: bool) -> int:
             try:
                 client = MprisClient.pick_player(preferred=preferred_player)
             except NoPlayersFound:
-                renderer.render("terminal-lyrics", ["Нет активных MPRIS-плееров"], current_idx=-1)
+                renderer.render("terminal-lyrics", [t("no_mpris_players")], current_idx=-1)
                 time.sleep(1.0)
                 continue
 
             try:
                 ti = client.track_info()
             except PlayerUnavailable as e:
-                renderer.render("terminal-lyrics", [f"MPRIS недоступен: {e}"], current_idx=-1)
+                renderer.render("terminal-lyrics", [t("mpris_unavailable", msg=str(e))], current_idx=-1)
                 time.sleep(0.5)
                 continue
 
             if not ti.title or not ti.artist:
-                renderer.render("terminal-lyrics", ["Не удалось получить artist/title из MPRIS"], current_idx=-1)
+                renderer.render("terminal-lyrics", [t("no_artist_title")], current_idx=-1)
                 time.sleep(0.5)
                 continue
 
@@ -71,7 +73,7 @@ def watch(cfg: AppConfig, *, preferred_player: str | None, debug: bool) -> int:
                 track = TrackKey(artist=ti.artist, title=ti.title, album=ti.album)
                 res = svc.get_lyrics(track)
                 if not res.has_lyrics or not res.lrc_text:
-                    renderer.render(track.display, ["Слова не найдены для текущего трека"], current_idx=-1)
+                    renderer.render(track.display, [t("lyrics_not_found")], current_idx=-1)
                     time.sleep(0.5)
                     continue
 
@@ -87,7 +89,7 @@ def watch(cfg: AppConfig, *, preferred_player: str | None, debug: bool) -> int:
                     last_rendered_plain = "\n".join(plain_lines)
                     # Add visual indicator for unsynced lyrics
                     title_with_indicator = (
-                        f"{track.display} {renderer.theme.warning}[несинхронизированный текст]{renderer.theme.reset}"
+                        f"{track.display} {renderer.theme.warning}{t('unsynced_label')}{renderer.theme.reset}"
                     )
                     renderer.render(title_with_indicator, plain_lines, current_idx=-1, context_lines=cfg.context_lines)
 

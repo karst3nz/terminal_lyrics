@@ -1,8 +1,20 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 import os
 from pathlib import Path
+
+
+def _config_dir() -> Path:
+    xdg = os.getenv("XDG_CONFIG_HOME")
+    if xdg:
+        return Path(xdg) / "terminal-lyrics"
+    return Path.home() / ".config" / "terminal-lyrics"
+
+
+def _config_file() -> Path:
+    return _config_dir() / "config.json"
 
 
 @dataclass(frozen=True)
@@ -10,6 +22,10 @@ class AppConfig:
     # Storage
     data_dir: Path
     cache_db_path: Path
+    config_dir: Path
+
+    # Locale
+    lang: str
 
     # Sources
     sources: tuple[str, ...]
@@ -39,9 +55,14 @@ def load_config() -> AppConfig:
     context_lines = int(os.getenv("TERMINAL_LYRICS_CONTEXT_LINES", "1"))
     use_alt_screen = os.getenv("TERMINAL_LYRICS_ALT_SCREEN", "1") not in ("0", "false", "False")
 
+    config_dir = _config_dir()
+    lang = _load_lang(config_dir)
+
     return AppConfig(
         data_dir=data_dir,
         cache_db_path=data_dir / "cache.sqlite3",
+        config_dir=config_dir,
+        lang=lang,
         sources=sources,
         api_min_interval_s=float(os.getenv("TERMINAL_LYRICS_API_MIN_INTERVAL", "5.0")),
         api_max_retries=int(os.getenv("TERMINAL_LYRICS_API_MAX_RETRIES", "3")),
@@ -51,4 +72,34 @@ def load_config() -> AppConfig:
         context_lines=context_lines,
         use_alt_screen=use_alt_screen,
     )
+
+
+def _load_lang(config_dir: Path) -> str:
+    # Priority: config.json → TERMINAL_LYRICS_LANG → "EN"
+    cfg_path = config_dir / "config.json"
+    if cfg_path.exists():
+        try:
+            data = json.loads(cfg_path.read_text(encoding="utf-8"))
+            raw = (data.get("lang") or "en").upper()
+            if raw in ("RU", "EN"):
+                return raw
+        except Exception:
+            pass
+    env_lang = os.getenv("TERMINAL_LYRICS_LANG")
+    if env_lang and env_lang.upper() in ("RU", "EN"):
+        return env_lang.upper()
+    return "EN"
+
+
+def save_config_lang(lang: str) -> None:
+    cfg_path = _config_file()
+    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    data: dict[str, str] = {}
+    if cfg_path.exists():
+        try:
+            data = json.loads(cfg_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    data["lang"] = lang.upper()
+    cfg_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 

@@ -13,12 +13,14 @@ Display synchronized lyrics in your terminal, fetched automatically for the song
 
 *   **Synchronized Lyrics Display**: Shows LRC format lyrics that scroll in time with your music.
 *   **MPRIS Integration**: Automatically detects and connects to active MPRIS v2 compatible players (e.g., Spotify, VLC, Audacious).
-*   **Multiple Lyrics Sources**: Fetches lyrics from various sources, including `lrclib.net` and `lyrics.ovh`.
+*   **Multiple Lyrics Sources**: Fetches lyrics from `lrclib.net`
 *   **Intelligent Fallbacks**: If an exact match isn't found, it performs a broader search to find the correct lyrics. Plain (unsynchronized) lyrics are used as a fallback.
 *   **Local Caching**: Caches lyrics in an SQLite database to minimize API requests and provide offline access.
 *   **Responsive Terminal UI**: Uses an alternate screen buffer, renders with ANSI colors, and handles terminal resizing gracefully.
 *   **Powerful CLI**: A command-line interface to watch lyrics, manage the cache, search for lyrics, and convert lyric formats.
 *   **Configurable**: Customize behavior through environment variables.
+*   **Language**: Change the program language using ``` python -m terminal_lyrics config --lang RU/EN```
+
 
 ## Example
 
@@ -102,7 +104,7 @@ The application can be configured using environment variables:
 | Variable                      | Description                                                               | Default             |
 | ----------------------------- | ------------------------------------------------------------------------- | ------------------- |
 | `TERMINAL_LYRICS_PLAYER`      | Preferred MPRIS player name (e.g., `spotify`).                            | (none)              |
-| `TERMINAL_LYRICS_SOURCES`     | Comma-separated list of sources to query.                                 | `lrclib`            |
+| `TERMINAL_LYRICS_SOURCES`     | Comma-separated list of sources to query. **(not useful yet)**                                 | `lrclib`            |
 | `TERMINAL_LYRICS_REFRESH_HZ`  | Screen refresh and player polling rate in Hertz.                          | `30.0`              |
 | `TERMINAL_LYRICS_CONTEXT_LINES` | Number of context lines to display above and below the current lyric line.  | `1`                 |
 | `TERMINAL_LYRICS_ALT_SCREEN`  | Set to `0` or `false` to disable the alternate screen buffer.               | `1` (enabled)       |

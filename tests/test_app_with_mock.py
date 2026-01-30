@@ -21,6 +21,8 @@ class TestAppWithMockPlayer:
         cfg = AppConfig(
             data_dir=tmp_path / "data",
             cache_db_path=tmp_path / "cache.sqlite3",
+            config_dir=tmp_path / "config",
+            lang="EN",
             sources=("lrclib",),
             api_min_interval_s=0.1,
             api_max_retries=1,
@@ -56,6 +58,8 @@ class TestAppWithMockPlayer:
         cfg = AppConfig(
             data_dir=tmp_path / "data",
             cache_db_path=tmp_path / "cache.sqlite3",
+            config_dir=tmp_path / "config",
+            lang="EN",
             sources=(),
             api_min_interval_s=1.0,
             api_max_retries=1,

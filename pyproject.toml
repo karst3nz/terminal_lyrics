@@ -54,7 +54,7 @@ Issues = "https://github.com/karst3nz/terminal_lyrics/issues"
 packages = {find = {}}
 
 [tool.setuptools.package-data]
-terminal_lyrics = ["py.typed"]
+terminal_lyrics = ["py.typed", "i18n/*.json"]
 
 [tool.black]
 line-length = 100
