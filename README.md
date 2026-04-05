@@ -44,8 +44,6 @@ cd terminal_lyrics
 pip install .
 ```
 
-For detailed installation instructions, see [INSTALL.md](INSTALL.md).
-
 ## Quick Start
 
 ### 1. Start watching lyrics
@@ -177,8 +175,6 @@ terminal_lyrics config --no-animations
 ```
 
 Configuration is saved to `~/.config/terminal_lyrics/config.json`.
-
-For more details on visual customization, see [VISUAL_FEATURES.md](VISUAL_FEATURES.md).
 
 ### Environment Variables
 
