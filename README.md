@@ -4,9 +4,6 @@ Display synchronized lyrics in your terminal, fetched automatically for the song
 
 `terminal_lyrics` connects to music players like Spotify, VLC, and others on Linux via the MPRIS D-Bus interface. It identifies the currently playing track, fetches its lyrics from online sources, and displays them in your terminal, highlighting the current line in sync with the music.
 
-**Tested on CachyOS (ArchLinux)**
-![fastfetch](example_video/tested_on.png)
-
 **Thanks to [LRCLIB](https://lrclib.net/) for free public API! <3**
 
 ## Features
@@ -31,7 +28,7 @@ Display synchronized lyrics in your terminal, fetched automatically for the song
 
 ## Example
 
-![Example of terminal_lyrics in action](example_video/123.webp)
+![Example of terminal_lyrics in action](example_video/123.png)
 
 ## Installation
 
