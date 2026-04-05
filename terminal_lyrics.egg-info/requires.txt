@@ -3,6 +3,9 @@ regex
 dbus-python
 requests
 typer
+numpy
+pulsectl
+sounddevice
 
 [dev]
 pytest

@@ -7,12 +7,15 @@ terminal_lyrics/app.py
 terminal_lyrics/cli.py
 terminal_lyrics/config.py
 terminal_lyrics/logging_setup.py
+terminal_lyrics/tui_config.py
 terminal_lyrics.egg-info/PKG-INFO
 terminal_lyrics.egg-info/SOURCES.txt
 terminal_lyrics.egg-info/dependency_links.txt
 terminal_lyrics.egg-info/entry_points.txt
 terminal_lyrics.egg-info/requires.txt
 terminal_lyrics.egg-info/top_level.txt
+terminal_lyrics/audio/__init__.py
+terminal_lyrics/audio/analyzer.py
 terminal_lyrics/cache/__init__.py
 terminal_lyrics/cache/sqlite.py
 terminal_lyrics/i18n/__init__.py
@@ -27,6 +30,10 @@ terminal_lyrics/mpris/client.py
 terminal_lyrics/mpris/errors.py
 terminal_lyrics/render/__init__.py
 terminal_lyrics/render/ansi.py
+terminal_lyrics/render/effects.py
+terminal_lyrics/render/layout.py
+terminal_lyrics/render/themes.py
+terminal_lyrics/render/visualizer.py
 terminal_lyrics/sources/__init__.py
 terminal_lyrics/sources/base.py
 terminal_lyrics/sources/lrclib.py

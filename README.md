@@ -16,20 +16,66 @@ Display synchronized lyrics in your terminal, fetched automatically for the song
 *   **Multiple Lyrics Sources**: Fetches lyrics from `lrclib.net`
 *   **Intelligent Fallbacks**: If an exact match isn't found, it performs a broader search to find the correct lyrics. Plain (unsynchronized) lyrics are used as a fallback.
 *   **Local Caching**: Caches lyrics in an SQLite database to minimize API requests and provide offline access.
+*   **Enhanced Visual Experience**:
+    *   🎨 **17 Unique Color Themes**: nord, dracula, monokai, gruvbox, tokyo_night, catppuccin, synthwave, matrix, sunset, ocean, cherry_blossom, cyberpunk, forest, lava, solarized_dark/light
+    *   📊 **Progress Bar**: Real-time playback progress with time stamps
+    *   🎵 **20-Band Equalizer**: Real-time audio visualization with gradient shading and adaptive smoothing
+    *   🖼️ **Beautiful Borders**: 5 styles (rounded, double, single, heavy, ascii)
+    *   ✨ **Animations**: Smooth transitions, gradients, and pulsing effects
+    *   🎯 **Customizable Layout**: Center text, show/hide metadata, configure visualizer position
 *   **Responsive Terminal UI**: Uses an alternate screen buffer, renders with ANSI colors, and handles terminal resizing gracefully.
 *   **Powerful CLI**: A command-line interface to watch lyrics, manage the cache, search for lyrics, and convert lyric formats.
-*   **Configurable**: Customize behavior through environment variables.
-*   **Language**: Change the program language using ``` python -m terminal_lyrics config --lang RU/EN```
+*   **Highly Configurable**: Customize appearance and behavior through config file or CLI.
+*   **Language Support**: English and Russian (change with `python -m terminal_lyrics config --lang RU/EN`)
 
 
 ## Example
 
-![Example of terminal-lyrics in action](example_video/123.webp)
+![Example of terminal_lyrics in action](example_video/123.webp)
 
 ## Installation
 
+### Quick Install
 ```bash
 pip install git+https://github.com/karst3nz/terminal_lyrics.git
+```
+
+### From Source
+```bash
+git clone https://github.com/karst3nz/terminal_lyrics.git
+cd terminal_lyrics
+pip install .
+```
+
+For detailed installation instructions, see [INSTALL.md](INSTALL.md).
+
+## Quick Start
+
+### 1. Start watching lyrics
+```bash
+terminal_lyrics watch
+# or
+python -m terminal_lyrics watch
+```
+
+### 2. Customize appearance
+```bash
+# List available themes
+terminal_lyrics config --list-themes
+
+# Set a theme
+terminal_lyrics config --theme nord
+
+# Enable visualizer
+terminal_lyrics config --visualizer
+
+# Change border style
+terminal_lyrics config --border double
+```
+
+### 3. View current settings
+```bash
+terminal_lyrics config
 ```
 
 ## Usage
@@ -79,7 +125,7 @@ python -m terminal_lyrics search -t "Stairway to Heaven" --json
 
 ### Manage the Cache
 
-Lyrics are cached to `~/.cache/terminal-lyrics/cache.sqlite3`. You can clear this cache using the CLI.
+Lyrics are cached to `~/.cache/terminal_lyrics/cache.sqlite3`. You can clear this cache using the CLI.
 
 ```bash
 python -m terminal_lyrics cache --clear
@@ -99,21 +145,65 @@ python -m terminal_lyrics export my_song.lrc --format json --out my_song.json
 
 ## Configuration
 
-The application can be configured using environment variables:
+### Visual Settings
+
+Configure appearance through the CLI:
+
+```bash
+# View current settings
+terminal_lyrics config
+
+# List available themes
+terminal_lyrics config --list-themes
+
+# Change theme
+terminal_lyrics config --theme nord
+
+# Change border style (rounded, double, single, heavy, ascii)
+terminal_lyrics config --border double
+
+# Enable/disable progress bar
+terminal_lyrics config --progress-bar
+terminal_lyrics config --no-progress-bar
+
+# Enable/disable visualizer
+terminal_lyrics config --visualizer
+terminal_lyrics config --no-visualizer
+
+# Center/left-align text
+terminal_lyrics config --center-text
+terminal_lyrics config --no-center-text
+
+# Enable/disable animations
+terminal_lyrics config --animations
+terminal_lyrics config --no-animations
+```
+
+Configuration is saved to `~/.config/terminal_lyrics/config.json`.
+
+For more details on visual customization, see [VISUAL_FEATURES.md](VISUAL_FEATURES.md).
+
+### Environment Variables
+
+The application can also be configured using environment variables:
 
 | Variable                      | Description                                                               | Default             |
 | ----------------------------- | ------------------------------------------------------------------------- | ------------------- |
 | `TERMINAL_LYRICS_PLAYER`      | Preferred MPRIS player name (e.g., `spotify`).                            | (none)              |
-| `TERMINAL_LYRICS_SOURCES`     | Comma-separated list of sources to query. **(not useful yet)**                                 | `lrclib`            |
-| `TERMINAL_LYRICS_REFRESH_HZ`  | Screen refresh and player polling rate in Hertz.                          | `30.0`              |
+| `TERMINAL_LYRICS_SOURCES`     | Comma-separated list of sources to query. **(not useful yet)**            | `lrclib`            |
+| `TERMINAL_LYRICS_REFRESH_HZ`  | Screen refresh and player polling rate in Hertz.                          | `60.0`              |
 | `TERMINAL_LYRICS_CONTEXT_LINES` | Number of context lines to display above and below the current lyric line.  | `1`                 |
-| `TERMINAL_LYRICS_ALT_SCREEN`  | Set to `0` or `false` to disable the alternate screen buffer.               | `1` (enabled)       |
-| `TERMINAL_LYRICS_LOG_LEVEL`   | Set the logging level (e.g., `DEBUG`, `INFO`, `WARNING`).                   | `INFO`              |
+| `TERMINAL_LYRICS_ALT_SCREEN`  | Set to `0` or `false` to disable the alternate screen buffer.            | `1` (enabled)       |
+| `TERMINAL_LYRICS_LOG_LEVEL`   | Set the logging level (e.g., `DEBUG`, `INFO`, `WARNING`).                | `INFO`              |
+| `TERMINAL_LYRICS_THEME`       | Color theme name.                                                         | `default`           |
+| `TERMINAL_LYRICS_BORDER_STYLE`| Border style (rounded, double, single, heavy, ascii).                     | `rounded`           |
+| `TERMINAL_LYRICS_VISUALIZER`  | Enable visualizer (`1` or `0`).                                           | `0`                 |
 
 Example:
 ```bash
 export TERMINAL_LYRICS_PLAYER="vlc"
-export TERMINAL_LYRICS_SOURCES="lrclib,lyrics_ovh"
+export TERMINAL_LYRICS_THEME="nord"
+export TERMINAL_LYRICS_VISUALIZER="1"
 python -m terminal_lyrics watch
 ```
 

@@ -1,5 +1,4 @@
 build
-dist
 example_video
 terminal_lyrics
 tests

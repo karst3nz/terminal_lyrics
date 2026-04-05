@@ -18,6 +18,7 @@ class TrackInfo:
     album: str
     # stable-ish identifier for "track changed" checks
     track_key: str
+    length_ms: int = 0
 
 
 def _to_str(value: Any) -> str:
@@ -107,6 +108,15 @@ class MprisClient:
         album = _to_str(md.get("xesam:album", "")) or ""
         url = _to_str(md.get("xesam:url", "")) or ""
         track_id = _to_str(md.get("mpris:trackid", "")) or ""
-        key = " | ".join(x for x in (artist, title, album, url, track_id) if x)
-        return TrackInfo(title=title, artist=artist, album=album, track_key=key)
 
+        # Get track length in microseconds, convert to milliseconds
+        length_us = md.get("mpris:length", 0)
+        try:
+            length_ms = int(length_us) // 1000
+        except (ValueError, TypeError):
+            length_ms = 0
+
+        key = " | ".join(x for x in (artist, title, album, url, track_id) if x)
+        return TrackInfo(
+            title=title, artist=artist, album=album, track_key=key, length_ms=length_ms
+        )

@@ -4,5 +4,6 @@ dbus-python
 requests
 soundfile
 sounddevice
+numpy
 typer
 

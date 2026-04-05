@@ -2,3 +2,6 @@
 __pycache__/
 .vscode/
 build/
+.pytest_cache/
+.ruff_cache
+test_*.py

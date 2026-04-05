@@ -31,6 +31,9 @@ dependencies = [
     "dbus-python",
     "requests",
     "typer",
+    "numpy",
+    "pulsectl",
+    "sounddevice",
 ]
 
 [project.optional-dependencies]
