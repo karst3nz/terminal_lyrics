@@ -27,7 +27,7 @@ class VisualConfig:
     show_progress_bar: bool = True
     show_metadata: bool = True
     show_visualizer: bool = False
-    visualizer_style: Literal["equalizer"] = "equalizer"
+    visualizer_style: Literal["equalizer", "waveform"] = "equalizer"
     visualizer_position: Literal["top", "bottom", "off"] = "top"
     center_text: bool = True
     enable_animations: bool = True

@@ -41,6 +41,7 @@ def watch(cfg: AppConfig, *, preferred_player: str | None, debug: bool) -> int:
         use_real_audio=cfg.audio.use_real_audio,
         audio_device=cfg.audio.audio_device,
         audio_backend=cfg.audio.audio_backend,
+        waveform_style="detailed",  # Can be configured later
     )
 
     # Use enhanced renderer

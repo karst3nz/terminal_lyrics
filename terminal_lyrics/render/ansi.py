@@ -65,6 +65,7 @@ class RenderOptions:
     use_real_audio: bool = True  # Use real audio data for visualizer
     audio_device: str | None = None  # Audio device name
     audio_backend: str = "auto"  # Audio backend
+    waveform_style: str = "detailed"  # Waveform rendering style: "simple" or "detailed"
 
 
 class EnhancedRenderer:
@@ -100,6 +101,7 @@ class EnhancedRenderer:
                 use_real_audio=self.options.use_real_audio,
                 audio_device=self.options.audio_device,
                 audio_backend=self.options.audio_backend,
+                waveform_style=self.options.waveform_style,
             )
             self.simple_visualizer = SimpleVisualizer(style="equalizer", speed=5.0)
         else:

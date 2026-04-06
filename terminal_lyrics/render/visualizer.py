@@ -4,13 +4,14 @@ import math
 import random
 import time
 from typing import Literal, Optional
+from venv import logger
 
 
-VisualizerStyle = Literal["equalizer"]
+VisualizerStyle = Literal["equalizer", "waveform"]
 
 
 class MusicVisualizer:
-    """20-band equalizer visualizer."""
+    """20-band equalizer visualizer with waveform support."""
 
     def __init__(
         self,
@@ -20,10 +21,12 @@ class MusicVisualizer:
         use_real_audio: bool = True,
         audio_device: Optional[str] = None,
         audio_backend: str = "auto",
+        waveform_style: Literal["simple", "detailed"] = "detailed",
     ):
         self.width = width
         self.height = height
         self.style = style
+        self.waveform_style = waveform_style
         self.start_time = time.time()
         self.bars: list[int] = [0] * width
         self.phase = 0.0
@@ -66,22 +69,22 @@ class MusicVisualizer:
             if not frequency_data or all(v == 0.0 for v in frequency_data):
                 return
 
-            max_val = max(frequency_data)
-            if max_val == 0:
-                return
-
             for i in range(min(self.width, len(frequency_data))):
-                scaled = frequency_data[i] / max_val
-                boosted = scaled ** 0.6
-                target = int(boosted * (self.height + 1))
+                raw = frequency_data[i]  # уже [0..1]
+
+                # Логарифмическое масштабирование — ближе к восприятию на слух
+                # +epsilon чтобы не было log(0)
+                boosted = math.log1p(raw * 40) / math.log1p(10)  # [0..1] → [0..1]
+
+                target = int(boosted * self.height)
 
                 current = self.bars[i]
-                diff = target - current
 
-                if diff > 0:
-                    self.bars[i] = int(current * 0.1 + target * 0.9)
+                if target > current:
+                    self.bars[i] = int(current * 0.2 + target * 0.8)  # быстрый подъём
                 else:
-                    self.bars[i] = int(current * 0.8 + target * 0.2)
+                    self.bars[i] = int(current * 0.85 + target * 0.15)  # плавный спад
+
         except Exception:
             self._update_simulation(time.time() - self.start_time)
 
@@ -124,6 +127,8 @@ class MusicVisualizer:
 
     def render(self) -> list[str]:
         """Render visualizer as list of lines."""
+        if self.style == "waveform":
+            return self._render_waveform()
         return self._render_equalizer()
 
     def _render_equalizer(self) -> list[str]:
@@ -142,6 +147,104 @@ class MusicVisualizer:
                         line += "▒"
                 else:
                     line += " "
+            lines.append(line)
+
+        return lines
+
+    def _render_waveform(self) -> list[str]:
+        """Render waveform-style visualization with symmetric bars.
+        
+        Creates a symmetric waveform visualization that expands outward
+        from the center, similar to audio waveform displays.
+        """
+        lines = []
+        center_row = self.height // 2
+        
+        for row in range(self.height - 1, -1, -1):
+            line = ""
+            dist_from_center = row - center_row
+            
+            for bar_height in self.bars:
+                # Calculate distance from center (absolute value)
+                abs_dist = abs(dist_from_center)
+                
+                if self.waveform_style == "simple":
+                    # Simple style: small symmetric dots/bars expanding from center
+                    if abs_dist == 0:
+                        # Center row: show if any audio
+                        if bar_height > 0:
+                            line += "●"
+                        else:
+                            line += " "
+                    elif abs_dist == 1:
+                        # One row above/below center
+                        if bar_height > 1:
+                            line += "●"
+                        else:
+                            line += " "
+                    else:
+                        # Further rows: only for loud audio
+                        if bar_height > 3:
+                            line += " "
+                        else:
+                            line += " "
+                else:
+                    # Detailed style: smooth gradient from center
+                    if abs_dist == 0:
+                        # Center row
+                        if bar_height >= 4:
+                            line += "▓"
+                        elif bar_height >= 2:
+                            line += "▒"
+                        elif bar_height >= 1:
+                            line += "░"
+                        else:
+                            line += " "
+                    elif abs_dist == 1:
+                        # Adjacent rows
+                        if bar_height >= 3:
+                            line += "▒"
+                        elif bar_height >= 2:
+                            line += "░"
+                        else:
+                            line += " "
+                    else:
+                        # Outer rows
+                        if bar_height >= 4:
+                            line += "░"
+                        else:
+                            line += " "
+            
+            lines.append(line)
+
+        return lines
+
+    def _render_waveform_simple(self) -> list[str]:
+        """Render a simpler waveform visualization matching the reference image style."""
+        lines = []
+        center_row = self.height // 2
+        
+        for row in range(self.height - 1, -1, -1):
+            line = ""
+            abs_dist = abs(row - center_row)
+            
+            for bar_height in self.bars:
+                if abs_dist == 0:
+                    # Center line - always show for active bars
+                    if bar_height > 0:
+                        line += "●"
+                    else:
+                        line += " "
+                elif abs_dist == 1:
+                    # One above/below - show for louder audio
+                    if bar_height > 1:
+                        line += "●"
+                    else:
+                        line += " "
+                else:
+                    # Further - only for very loud audio
+                    line += " "
+            
             lines.append(line)
 
         return lines

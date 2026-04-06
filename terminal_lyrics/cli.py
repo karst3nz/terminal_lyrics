@@ -282,12 +282,12 @@ def config(
         typer.echo(f"Visualizer: {'enabled' if visualizer else 'disabled'}")
 
     if visualizer_style is not None:
-        if visualizer_style != "equalizer":
-            typer.echo("Invalid visualizer style. Choose: equalizer", err=True)
+        if visualizer_style not in ("equalizer", "waveform"):
+            typer.echo("Invalid visualizer style. Choose: equalizer, waveform", err=True)
             raise typer.Exit(code=1)
         visual_dict["visualizer_style"] = visualizer_style
         visual_changed = True
-        typer.echo("Visualizer style: equalizer")
+        typer.echo(f"Visualizer style: {visualizer_style}")
 
     if center_text is not None:
         visual_dict["center_text"] = center_text
