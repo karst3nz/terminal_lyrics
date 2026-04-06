@@ -179,7 +179,7 @@ class EnhancedRenderer:
         cols, rows = shutil.get_terminal_size(fallback=(80, 24))
         out: list[str] = []
         # Calculate available space
-        header_lines = 0
+        header_lines = 1
         if self.options.show_metadata:
             header_lines += 3  # title + separator + progress
         if (
