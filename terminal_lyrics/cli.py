@@ -10,6 +10,7 @@ from terminal_lyrics.config import (
     save_config_lang,
     save_visual_config,
     save_audio_config,
+    save_input_config,
     VisualConfig,
     AudioConfig,
     list_audio_devices,
@@ -21,9 +22,28 @@ from terminal_lyrics.lrc.parse import parse_lrc_with_stats
 from terminal_lyrics.mpris.client import MprisClient
 from terminal_lyrics.sources.service import LyricsService
 from terminal_lyrics.render.themes import ThemeManager
+from terminal_lyrics.tui_config import run_setup_tui
 
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
+
+
+def _choice_prompt(title: str, options: list[str], current: str) -> str:
+    typer.echo(f"\n{title}")
+    for idx, opt in enumerate(options, 1):
+        marker = " (current)" if opt == current else ""
+        typer.echo(f"  {idx}. {opt}{marker}")
+    raw = typer.prompt("Choose number (Enter to keep current)", default="").strip()
+    if not raw:
+        return current
+    try:
+        num = int(raw)
+        if 1 <= num <= len(options):
+            return options[num - 1]
+    except ValueError:
+        pass
+    typer.echo("Invalid choice, keeping current value.")
+    return current
 
 
 @app.command()
@@ -35,7 +55,7 @@ def watch(
     log_file: bool = typer.Option(
         False,
         "--log-file",
-        help="Write logs to file (~/.cache/terminal-lyrics/terminal-lyrics.log)",
+        help="Write logs to file (~/.cache/terminal_lyrics/terminal_lyrics.log)",
     ),
     refresh_hz: float | None = typer.Option(None, "--refresh-hz", help="Polling frequency (Hz)"),
     no_alt_screen: bool = typer.Option(
@@ -207,13 +227,21 @@ def config(
     visualizer_style: str | None = typer.Option(
         None,
         "--visualizer-style",
-        help="Visualizer style: bars, wave, pulse, spectrum, notes, equalizer",
+        help="Visualizer style: equalizer, waveform, blocks, dots, centered",
     ),
     center_text: bool | None = typer.Option(
         None, "--center-text/--no-center-text", help="Center lyrics text"
     ),
     animations: bool | None = typer.Option(
         None, "--animations/--no-animations", help="Enable/disable animations"
+    ),
+    mouse: bool | None = typer.Option(
+        None, "--mouse/--no-mouse", help="Enable/disable mouse click controls"
+    ),
+    media_controls: bool | None = typer.Option(
+        None,
+        "--media-controls/--no-media-controls",
+        help="Enable/disable clickable media control buttons (prev/play/next)",
     ),
 ):
     """Manage settings (language, theme, visual options, etc.)."""
@@ -282,8 +310,11 @@ def config(
         typer.echo(f"Visualizer: {'enabled' if visualizer else 'disabled'}")
 
     if visualizer_style is not None:
-        if visualizer_style not in ("equalizer", "waveform"):
-            typer.echo("Invalid visualizer style. Choose: equalizer, waveform", err=True)
+        if visualizer_style not in ("equalizer", "waveform", "blocks", "dots", "centered"):
+            typer.echo(
+                "Invalid visualizer style. Choose: equalizer, waveform, blocks, dots, centered",
+                err=True,
+            )
             raise typer.Exit(code=1)
         visual_dict["visualizer_style"] = visualizer_style
         visual_changed = True
@@ -298,6 +329,14 @@ def config(
         visual_dict["enable_animations"] = animations
         visual_changed = True
         typer.echo(f"Animations: {'enabled' if animations else 'disabled'}")
+
+    if mouse is not None:
+        save_input_config(mouse, cfg.enable_media_controls)
+        typer.echo(f"Mouse controls: {'enabled' if mouse else 'disabled'}")
+
+    if media_controls is not None:
+        save_input_config(cfg.enable_mouse, media_controls)
+        typer.echo(f"Media control buttons: {'enabled' if media_controls else 'disabled'}")
 
     if visual_changed:
         new_visual = VisualConfig(**visual_dict)
@@ -316,6 +355,8 @@ def config(
             visualizer_style,
             center_text,
             animations,
+            mouse is not None,
+            media_controls is not None,
         ]
     ):
         typer.echo(t("lang_current", lang=cfg.lang))
@@ -326,14 +367,8 @@ def config(
         typer.echo(f"Visualizer style: {cfg.visual.visualizer_style}")
         typer.echo(f"Center text: {'enabled' if cfg.visual.center_text else 'disabled'}")
         typer.echo(f"Animations: {'enabled' if cfg.visual.enable_animations else 'disabled'}")
-
-
-@app.command()
-def configure():
-    """Interactive visual configuration (TUI)."""
-    from terminal_lyrics.tui_config import run
-
-    run()
+        typer.echo(f"Mouse controls: {'enabled' if cfg.enable_mouse else 'disabled'}")
+        typer.echo(f"Media control buttons: {'enabled' if cfg.enable_media_controls else 'disabled'}")
 
 
 @app.command()
@@ -407,6 +442,26 @@ def audio(
         typer.echo(f"Audio device: {cfg.audio.audio_device or 'auto-detect'}")
         typer.echo(f"Audio backend: {cfg.audio.audio_backend}")
         typer.echo(f"Real audio capture: {'enabled' if cfg.audio.use_real_audio else 'disabled'}")
+
+
+@app.command()
+def wizard():
+    """Interactive TUI setup wizard with live preview."""
+    cfg = load_config()
+    set_lang(cfg.lang)
+    theme_manager = ThemeManager(cfg.config_dir)
+    result = run_setup_tui(cfg, theme_manager=theme_manager)
+    if result is None:
+        typer.echo(t("wizard_cancelled"))
+        raise typer.Exit(code=0)
+
+    lang, visual_cfg, audio_cfg, enable_mouse, enable_media_controls = result
+    save_config_lang(lang)
+    save_visual_config(visual_cfg)
+    save_audio_config(audio_cfg)
+    save_input_config(enable_mouse, enable_media_controls)
+    set_lang(lang)
+    typer.echo(t("wizard_saved"))
 
 
 def main() -> None:

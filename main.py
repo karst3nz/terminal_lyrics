@@ -4,7 +4,7 @@ Compatibility entrypoint.
 
 The project has been refactored into the `terminal_lyrics` package.
 Prefer running:
-  - `terminal-lyrics watch`
+  - `terminal_lyrics watch`
 or:
   - `python -m terminal_lyrics`
 """

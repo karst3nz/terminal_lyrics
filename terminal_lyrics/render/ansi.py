@@ -1,11 +1,13 @@
 from __future__ import annotations
 import logging
+from pprint import pp
 import shutil
 import signal
 import sys
 from dataclasses import dataclass
 from typing import Callable
 from terminal_lyrics.render.themes import ANSITheme, ThemeManager
+from terminal_lyrics.i18n import t
 from terminal_lyrics.render.layout import (
     BorderChars,
     get_border_chars,
@@ -16,6 +18,7 @@ from terminal_lyrics.render.layout import (
     draw_progress_bar,
     format_time,
     wrap_text,
+    _display_width,
     ICON_PLAYING,
     ICON_PAUSED,
     ICON_MUSIC,
@@ -34,6 +37,19 @@ CSI = "\x1b["
 
 def _sgr(*codes: int) -> str:
     return CSI + ";".join(str(c) for c in codes) + "m"
+
+
+def media_controls_layout(cols: int, buttons_count: int = 3) -> tuple[int, list[int]]:
+    """Return inner width and per-button widths with centered remainder."""
+    inner_width = max(0, cols - 4)  # -2 borders, -2 horizontal padding
+    if buttons_count <= 0:
+        return inner_width, []
+    base = inner_width // buttons_count
+    remainder = inner_width - (base * buttons_count)
+    widths = [base] * buttons_count
+    # Put remainder into center button to keep visual symmetry.
+    widths[buttons_count // 2] += remainder
+    return inner_width, widths
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,6 +71,7 @@ class RenderOptions:
     border_style: str = "rounded"
     show_progress_bar: bool = True
     show_metadata: bool = True
+    show_media_controls: bool = True
     show_visualizer: bool = False
     visualizer_style: str = "spectrum"
     visualizer_position: str = "top"
@@ -155,11 +172,107 @@ class EnhancedRenderer:
         self._entered = False
         self._last_render_args = None
 
+    def _render_media_controls(self, cols: int) -> str:
+        """Render media control buttons row: prev, play/pause, next."""
+        if cols < 30:
+            return ""
+
+        # Dynamic play/pause based on current state
+        if self.is_playing:
+            play_icon = "⏸"
+            play_text = t("btn_pause")
+            play_color = self.ansi_theme.status_playing
+        else:
+            play_icon = "▶"
+            play_text = t("btn_play")
+            play_color = self.ansi_theme.status_paused
+
+        # Button definitions: (icon, label, color) - using i18n
+        buttons = [
+            ("⏮", t("btn_prev"), self.ansi_theme.time_text),
+            (play_icon, play_text, play_color),
+            ("⏭", t("btn_next"), self.ansi_theme.time_text),
+        ]
+
+        # Calculate available width for buttons (excluding borders and padding)
+        inner_width, btn_widths = media_controls_layout(cols, len(buttons))
+
+        # Build buttons row with proper centering (ignoring ANSI codes)
+        parts = []
+        for (icon, label, color), btn_width in zip(buttons, btn_widths):
+            btn_text = f" {icon} {label} "
+            visible_len = _display_width(btn_text)
+            padding = btn_width - visible_len
+            left_pad = padding // 2
+            right_pad = padding - left_pad
+            # Ensure no negative padding
+            left_pad = max(left_pad, 0)
+            right_pad = max(right_pad, 0)
+            centered = " " * left_pad + color + btn_text + self.ansi_theme.reset + " " * right_pad
+            parts.append(centered)
+        controls = "".join(parts)
+        visible_controls_width = _display_width(controls)
+        if visible_controls_width < inner_width:
+            pad = inner_width - visible_controls_width
+            pad_left = pad // 2
+            pad_right = pad - pad_left
+            controls = (" " * pad_left) + controls + (" " * pad_right)
+        return controls
+
     def update_playback_state(self, position: float, duration: float, playing: bool) -> None:
         """Update playback state for progress bar."""
         self.current_position = position
         self.total_duration = duration
         self.is_playing = playing
+
+    def _slice_visible_text(self, text: str, start_col: int, width: int) -> str:
+        """Slice plain text by terminal display columns."""
+        if width <= 0:
+            return ""
+        out: list[str] = []
+        col = 0
+        end_col = start_col + width
+        for ch in text:
+            ch_w = _display_width(ch)
+            next_col = col + ch_w
+            if next_col <= start_col:
+                col = next_col
+                continue
+            if col >= end_col:
+                break
+            # Include the whole char only if it fits.
+            if next_col <= end_col:
+                out.append(ch)
+            else:
+                break
+            col = next_col
+        return "".join(out)
+
+    def _animated_title(self, text: str, inner_width: int) -> str:
+        """Animate long title with smooth horizontal marquee."""
+        text_width = _display_width(text)
+        if text_width <= inner_width:
+            return text
+
+        overflow = text_width - inner_width
+        speed_cols_per_s = 8.0
+        hold_s = 1.0
+        travel_s = overflow / speed_cols_per_s
+        cycle_s = hold_s + travel_s + hold_s + travel_s
+        t = self.animation_state.elapsed() % max(cycle_s, 0.001)
+
+        if t < hold_s:
+            offset = 0
+        elif t < hold_s + travel_s:
+            offset = int((t - hold_s) * speed_cols_per_s)
+        elif t < hold_s + travel_s + hold_s:
+            offset = overflow
+        else:
+            back_t = t - (hold_s + travel_s + hold_s)
+            offset = overflow - int(back_t * speed_cols_per_s)
+
+        offset = max(0, min(overflow, offset))
+        return self._slice_visible_text(text, offset, inner_width)
 
     def render(
         self,
@@ -167,12 +280,27 @@ class EnhancedRenderer:
         lines: list[str],
         current_idx: int,
         context_lines: int = 1,
+        scroll_offset: int = 0,
         artist: str = "",
         album: str = "",
+        click_highlight_idx: int | None = None,
+        hover_highlight_idx: int | None = None,
+        status_notice: str | None = None,
     ) -> None:
         """Render with enhanced UI."""
         # Store args for SIGWINCH redraw
-        self._last_render_args = (title, lines, current_idx, context_lines, artist, album)
+        self._last_render_args = (
+            title,
+            lines,
+            current_idx,
+            context_lines,
+            scroll_offset,
+            artist,
+            album,
+            click_highlight_idx,
+            hover_highlight_idx,
+            status_notice,
+        )
         # Update animation state
         self.animation_state.tick()
         # Update visualizer
@@ -184,6 +312,8 @@ class EnhancedRenderer:
         header_lines = 1
         if self.options.show_metadata:
             header_lines += 3  # title + separator + progress
+            if self.options.show_media_controls:
+                header_lines += 1  # media controls row
         if (
             self.options.show_visualizer
             and self.visualizer
@@ -225,7 +355,12 @@ class EnhancedRenderer:
             icon = ICON_MUSIC
             if self.simple_visualizer and self.is_playing:
                 icon = self.simple_visualizer.get_frame()
-            title_text = f"{icon} {title}"
+            if status_notice:
+                title_text = f"{icon} {title}  [{status_notice}]"
+            else:
+                title_text = f"{icon} {title}"
+            title_overflow = _display_width(title_text) > max(1, cols - 4)
+            title_text = self._animated_title(title_text, max(1, cols - 4))
             # Apply gradient effect if enabled
             if (
                 self.options.enable_gradient
@@ -238,7 +373,7 @@ class EnhancedRenderer:
                 title_colored = self.ansi_theme.title + title_text + self.ansi_theme.reset
             out.append(
                 self.ansi_theme.border
-                + draw_box_line(title_colored, cols, self.border, "center")
+                + draw_box_line(title_colored, cols, self.border, "left" if title_overflow else "center")
                 + self.ansi_theme.reset
             )
             # Progress bar
@@ -291,6 +426,15 @@ class EnhancedRenderer:
                     + draw_box_line(progress_line, cols, self.border, "center")
                     + self.ansi_theme.reset
                 )
+
+                # Media control buttons row
+                if self.options.show_media_controls:
+                    controls_line = self._render_media_controls(cols)
+                    out.append(
+                        self.ansi_theme.border
+                        + draw_box_line(controls_line, cols, self.border)
+                        + self.ansi_theme.reset
+                    )
             out.append(
                 self.ansi_theme.border
                 + draw_box_separator(cols, self.border)
@@ -298,9 +442,10 @@ class EnhancedRenderer:
             )
         # Lyrics body - expand lines with word wrapping
         if current_idx < 0:
-            start = 0
+            base_start = 0
         else:
-            start = max(current_idx - context_lines, 0)
+            base_start = max(current_idx - context_lines, 0)
+        start = max(0, base_start + scroll_offset)
 
         # Wrap all lines first, keeping track of which original line each wrapped line belongs to
         # (original_idx, text, is_first_part)
@@ -323,6 +468,14 @@ class EnhancedRenderer:
                 # Only add triangle on the first part of the current line
                 prefix = "► " if is_first else "  "
                 styled_text = self.ansi_theme.current_line + prefix + text + self.ansi_theme.reset
+            elif click_highlight_idx is not None and orig_idx == click_highlight_idx:
+                # Briefly highlight clicked lyric line as seek feedback.
+                prefix = "▸ " if is_first else "  "
+                styled_text = self.ansi_theme.warning + prefix + text + self.ansi_theme.reset
+            elif hover_highlight_idx is not None and orig_idx == hover_highlight_idx:
+                # Hovered line under mouse pointer.
+                prefix = "▹ " if is_first else "  "
+                styled_text = self.ansi_theme.artist + prefix + text + self.ansi_theme.reset
             elif orig_idx < current_idx:
                 styled_text = self.ansi_theme.past_line + text + self.ansi_theme.reset
             else:
@@ -380,6 +533,7 @@ class AnsiRenderer:
         self._entered = False
         self._resize_handler: Callable[..., None] | None = None
         self._last_render_args: tuple[str, list[str], int, int] | None = None
+        self._last_scroll_offset: int = 0
 
     def __setattr__(self, name: str, value) -> None:
         """
@@ -390,11 +544,12 @@ class AnsiRenderer:
             mock_render = value
 
             def _wrapped_render(
-                title: str, lines: list[str], current_idx: int, context_lines: int = 1
+                title: str, lines: list[str], current_idx: int, context_lines: int = 1, scroll_offset: int = 0
             ):
                 self._last_render_args = (title, lines, current_idx, context_lines)
+                self._last_scroll_offset = scroll_offset
                 return mock_render(
-                    title, lines, current_idx=current_idx, context_lines=context_lines
+                    title, lines, current_idx=current_idx, context_lines=context_lines, scroll_offset=scroll_offset
                 )
 
             return object.__setattr__(self, name, _wrapped_render)
@@ -421,7 +576,7 @@ class AnsiRenderer:
         def _on_resize(signum=None, frame=None):
             if self._last_render_args:
                 title, lines, current_idx, context_lines = self._last_render_args
-                self.render(title, lines, current_idx, context_lines)
+                self.render(title, lines, current_idx, context_lines, self._last_scroll_offset)
 
         self._resize_handler = _on_resize
         signal.signal(signal.SIGWINCH, _on_resize)
@@ -440,6 +595,7 @@ class AnsiRenderer:
         sys.stdout.flush()
         self._entered = False
         self._last_render_args = None
+        self._last_scroll_offset = 0
 
     def render(
         self,
@@ -447,17 +603,20 @@ class AnsiRenderer:
         lines: list[str],
         current_idx: int,
         context_lines: int = 1,
+        scroll_offset: int = 0,
     ) -> None:
         # Store args for SIGWINCH redraw
         self._last_render_args = (title, lines, current_idx, context_lines)
+        self._last_scroll_offset = scroll_offset
         cols, rows = shutil.get_terminal_size(fallback=(80, 24))
         # reserve 1 line for title
         body_rows = max(rows - 1, 1)
         # window around current line, but keep within list
         if current_idx < 0:
-            start = 0
+            base_start = 0
         else:
-            start = max(current_idx - context_lines, 0)
+            base_start = max(current_idx - context_lines, 0)
+        start = max(0, base_start + scroll_offset)
         end = min(start + body_rows, len(lines))
         start = max(end - body_rows, 0)
         out: list[str] = []

@@ -30,7 +30,11 @@ Display synchronized lyrics in your terminal, fetched automatically for the song
 
 ## Example
 
-![Example of terminal_lyrics in action](example_video/123.png)
+![Example of terminal_lyrics in action](example_video/play.mp4)
+
+
+## Setting example
+![Example of config terminal_lyrics in action](example_video/config.mp4)
 
 ## Installation
 
@@ -75,6 +79,11 @@ terminal_lyrics config --border double
 terminal_lyrics config
 ```
 
+### 4. Run setup wizard (recommended)
+```bash
+terminal_lyrics wizard
+```
+
 ## Usage
 
 The application is run as a Python module. The primary command is `watch`.
@@ -92,7 +101,7 @@ This will clear the screen and show the lyrics, highlighting the active line. Pr
 **Options for `watch`:**
 
 *   `--player <name>`: Specify a preferred player (e.g., `vlc`, `spotify`).
-*   `--refresh-hz <rate>`: Set the polling frequency in Hz (e.g., `10.0`). Default is `30.0`.
+*   `--refresh-hz <rate>`: Set the polling frequency in Hz (e.g., `10.0`). Default is `60.0`.
 *   `--context <lines>`: Set the number of lines to show above and below the current line. Default is `1`.
 *   `--no-alt-screen`: Disable the alternate screen buffer, printing lyrics directly into your current terminal session.
 *   `--debug`: Enable verbose debug logging.
@@ -149,6 +158,9 @@ Configure appearance through the CLI:
 ```bash
 # View current settings
 terminal_lyrics config
+
+# Run interactive setup wizard
+terminal_lyrics wizard
 
 # List available themes
 terminal_lyrics config --list-themes

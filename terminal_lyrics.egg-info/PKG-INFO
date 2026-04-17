@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
-Name: terminal-lyrics
-Version: 0.1.0
+Name: terminal_lyrics
+Version: 2.0
 Summary: Display synchronized lyrics in your terminal, fetched automatically for the song playing in your MPRIS-compatible music player
 Home-page: https://github.com/karst3nz/terminal_lyrics
 Author: karst3nz
@@ -42,6 +42,8 @@ Display synchronized lyrics in your terminal, fetched automatically for the song
 
 `terminal_lyrics` connects to music players like Spotify, VLC, and others on Linux via the MPRIS D-Bus interface. It identifies the currently playing track, fetches its lyrics from online sources, and displays them in your terminal, highlighting the current line in sync with the music.
 
+**Works only on Linux!**
+
 **Thanks to [LRCLIB](https://lrclib.net/) for free public API! <3**
 
 ## Features
@@ -66,7 +68,11 @@ Display synchronized lyrics in your terminal, fetched automatically for the song
 
 ## Example
 
-![Example of terminal_lyrics in action](example_video/123.png)
+![Example of terminal_lyrics in action](example_video/play.mp4)
+
+
+## Setting example
+![Example of config terminal_lyrics in action](example_video/config.mp4)
 
 ## Installation
 
@@ -111,6 +117,11 @@ terminal_lyrics config --border double
 terminal_lyrics config
 ```
 
+### 4. Run setup wizard (recommended)
+```bash
+terminal_lyrics wizard
+```
+
 ## Usage
 
 The application is run as a Python module. The primary command is `watch`.
@@ -128,7 +139,7 @@ This will clear the screen and show the lyrics, highlighting the active line. Pr
 **Options for `watch`:**
 
 *   `--player <name>`: Specify a preferred player (e.g., `vlc`, `spotify`).
-*   `--refresh-hz <rate>`: Set the polling frequency in Hz (e.g., `10.0`). Default is `30.0`.
+*   `--refresh-hz <rate>`: Set the polling frequency in Hz (e.g., `10.0`). Default is `60.0`.
 *   `--context <lines>`: Set the number of lines to show above and below the current line. Default is `1`.
 *   `--no-alt-screen`: Disable the alternate screen buffer, printing lyrics directly into your current terminal session.
 *   `--debug`: Enable verbose debug logging.
@@ -185,6 +196,9 @@ Configure appearance through the CLI:
 ```bash
 # View current settings
 terminal_lyrics config
+
+# Run interactive setup wizard
+terminal_lyrics wizard
 
 # List available themes
 terminal_lyrics config --list-themes

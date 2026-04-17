@@ -1,2 +1,2 @@
 [console_scripts]
-terminal-lyrics = terminal_lyrics.cli:main
+terminal_lyrics = terminal_lyrics.cli:main

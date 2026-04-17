@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="terminal-lyrics",
+    name="terminal_lyrics",
     version="0.1.0",
     description="Display synchronized lyrics in your terminal, fetched automatically for the song playing in your MPRIS-compatible music player",
     long_description=open("README.md", encoding="utf-8").read(),
@@ -29,7 +29,7 @@ setup(
     },
     entry_points={
         "console_scripts": [
-            "terminal-lyrics=terminal_lyrics.cli:main",
+            "terminal_lyrics=terminal_lyrics.cli:main",
         ]
     },
     classifiers=[

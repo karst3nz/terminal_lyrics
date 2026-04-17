@@ -1,10 +1,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import unicodedata
 from typing import Literal
 
 
 BorderStyle = Literal["rounded", "double", "single", "heavy", "ascii"]
+
+
+def _display_width(text: str) -> int:
+    """Calculate terminal display width for Unicode text."""
+    width = 0
+    for ch in text:
+        if unicodedata.combining(ch):
+            continue
+        width += 2 if unicodedata.east_asian_width(ch) in ("F", "W") else 1
+    return width
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,7 +146,7 @@ def draw_box_line(
 
     ansi_escape = re.compile(r"\x1b\[[0-9;]*m")
     text_clean = ansi_escape.sub("", text)
-    text_len = len(text_clean)
+    text_len = _display_width(text_clean)
 
     if align == "center":
         padding_total = max(0, inner_width - text_len)
@@ -149,10 +160,32 @@ def draw_box_line(
         padding = max(0, inner_width - text_len)
         content = text + " " * padding
 
-    # Truncate if too long
-    if len(ansi_escape.sub("", content)) > inner_width:
-        # Simple truncation (doesn't handle ANSI perfectly, but good enough)
-        content = content[:inner_width]
+    # Truncate if too long (preserving ANSI and wide chars)
+    if _display_width(ansi_escape.sub("", content)) > inner_width:
+        visible = 0
+        out_parts: list[str] = []
+        i = 0
+        while i < len(content):
+            ch = content[i]
+            if ch == "\x1b":
+                end = content.find("m", i)
+                if end == -1:
+                    break
+                out_parts.append(content[i : end + 1])
+                i = end + 1
+                continue
+            ch_width = _display_width(ch)
+            if visible + ch_width > inner_width:
+                break
+            out_parts.append(ch)
+            visible += ch_width
+            i += 1
+        content = "".join(out_parts)
+
+    # Ensure exact inner width so right border is always aligned
+    visible_content_width = _display_width(ansi_escape.sub("", content))
+    if visible_content_width < inner_width:
+        content += " " * (inner_width - visible_content_width)
 
     return border.vertical + content + border.vertical
 
@@ -259,7 +292,7 @@ def center_text(text: str, width: int) -> str:
 
     ansi_escape = re.compile(r"\x1b\[[0-9;]*m")
     text_clean = ansi_escape.sub("", text)
-    text_len = len(text_clean)
+    text_len = _display_width(text_clean)
 
     if text_len >= width:
         return text
@@ -278,7 +311,7 @@ def wrap_text(text: str, width: int) -> list[str]:
     import re
 
     ansi_escape = re.compile(r"(\x1b\[[0-9;]*m)")
-    clean_width = len(ansi_escape.sub("", text))
+    clean_width = _display_width(ansi_escape.sub("", text))
 
     if clean_width <= width:
         return [text]
@@ -291,7 +324,7 @@ def wrap_text(text: str, width: int) -> list[str]:
 
     for word in words:
         word_clean = ansi_escape.sub("", word)
-        word_len = len(word_clean)
+        word_len = _display_width(word_clean)
         space_len = 1 if current_line_words else 0
 
         if current_clean_len + space_len + word_len <= width:
@@ -327,7 +360,7 @@ ICON_PLAYING = "▶"
 ICON_PAUSED = "⏸"
 ICON_STOPPED = "⏹"
 ICON_MUSIC = "♫"
-ICON_NOTE = "♪"
+ICON_NOTE = "♫"
 ICON_ALBUM = "💿"
 ICON_ARTIST = "🎤"
 ICON_CLOCK = "🕐"

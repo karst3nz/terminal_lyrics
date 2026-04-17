@@ -4,10 +4,9 @@ import math
 import random
 import time
 from typing import Literal, Optional
-from venv import logger
 
 
-VisualizerStyle = Literal["equalizer", "waveform"]
+VisualizerStyle = Literal["equalizer", "waveform", "blocks", "dots", "centered"]
 
 
 class MusicVisualizer:
@@ -129,6 +128,12 @@ class MusicVisualizer:
         """Render visualizer as list of lines."""
         if self.style == "waveform":
             return self._render_waveform()
+        if self.style == "blocks":
+            return self._render_blocks()
+        if self.style == "dots":
+            return self._render_dots()
+        if self.style == "centered":
+            return self._render_centered()
         return self._render_equalizer()
 
     def _render_equalizer(self) -> list[str]:
@@ -249,6 +254,55 @@ class MusicVisualizer:
 
         return lines
 
+    def _render_blocks(self) -> list[str]:
+        """Render chunky unicode blocks with height quantization."""
+        lines: list[str] = []
+        shades = " ▁▂▃▄▅▆▇█"
+        max_level = len(shades) - 1
+        for row in range(self.height - 1, -1, -1):
+            line = ""
+            for bar_height in self.bars:
+                level = int(max(0, min(max_level, (bar_height / max(1, self.height)) * max_level)))
+                threshold = int((row / max(1, self.height - 1)) * max_level)
+                line += shades[level] if level >= threshold else " "
+            lines.append(line)
+        return lines
+
+    def _render_dots(self) -> list[str]:
+        """Render pointillist style with dot accents."""
+        lines: list[str] = []
+        for row in range(self.height - 1, -1, -1):
+            line = ""
+            for bar_height in self.bars:
+                if bar_height <= row:
+                    line += " "
+                    continue
+                depth = bar_height - row
+                if depth >= 3:
+                    line += "●"
+                elif depth == 2:
+                    line += "◉"
+                else:
+                    line += "•"
+            lines.append(line)
+        return lines
+
+    def _render_centered(self) -> list[str]:
+        """Render bars mirrored around center line."""
+        lines: list[str] = []
+        center_row = self.height // 2
+        for row in range(self.height - 1, -1, -1):
+            line = ""
+            dist = abs(row - center_row)
+            for bar_height in self.bars:
+                amp = max(0, int(bar_height / 2))
+                if amp > dist:
+                    line += "█" if dist == 0 else "▓"
+                else:
+                    line += " "
+            lines.append(line)
+        return lines
+
 
 class SimpleVisualizer:
     """Simple animated equalizer icon for compact display."""
@@ -265,9 +319,11 @@ class SimpleVisualizer:
             self.phase = (elapsed * self.speed) % 1.0
 
     def render(self) -> str:
-        bars = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"]
-        idx = int(self.phase * len(bars))
-        return bars[idx]
+        # Keep title icon readable across terminals/fonts.
+        # Some fonts render low bars (e.g. ▁) almost like "_" in headers.
+        notes = ["♫", "♬", "♪", "♩"]
+        idx = int(self.phase * len(notes)) % len(notes)
+        return notes[idx]
 
     def get_frame(self) -> str:
         return self.render()

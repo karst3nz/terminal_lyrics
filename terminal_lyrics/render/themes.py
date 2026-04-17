@@ -456,7 +456,7 @@ class ThemeManager:
     """Manages theme loading and customization."""
 
     def __init__(self, config_dir: Path | None = None):
-        self.config_dir = config_dir or Path.home() / ".config" / "terminal-lyrics"
+        self.config_dir = config_dir or Path.home() / ".config" / "terminal_lyrics"
         self.themes_dir = self.config_dir / "themes"
         self.themes_dir.mkdir(parents=True, exist_ok=True)
 

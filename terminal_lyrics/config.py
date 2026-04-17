@@ -10,8 +10,8 @@ from typing import Literal
 def _config_dir() -> Path:
     xdg = os.getenv("XDG_CONFIG_HOME")
     if xdg:
-        return Path(xdg) / "terminal-lyrics"
-    return Path.home() / ".config" / "terminal-lyrics"
+        return Path(xdg) / "terminal_lyrics"
+    return Path.home() / ".config" / "terminal_lyrics"
 
 
 def _config_file() -> Path:
@@ -27,7 +27,7 @@ class VisualConfig:
     show_progress_bar: bool = True
     show_metadata: bool = True
     show_visualizer: bool = False
-    visualizer_style: Literal["equalizer", "waveform"] = "equalizer"
+    visualizer_style: Literal["equalizer", "waveform", "blocks", "dots", "centered"] = "equalizer"
     visualizer_position: Literal["top", "bottom", "off"] = "top"
     center_text: bool = True
     enable_animations: bool = True
@@ -74,12 +74,16 @@ class AppConfig:
     # Audio settings
     audio: AudioConfig
 
+    # Input
+    enable_mouse: bool = True
+    enable_media_controls: bool = True
+
 
 def load_config() -> AppConfig:
     # XDG base dir fallback
     xdg = os.getenv("XDG_CACHE_HOME")
     data_dir = Path(xdg) if xdg else Path.home() / ".cache"
-    data_dir = data_dir / "terminal-lyrics"
+    data_dir = data_dir / "terminal_lyrics"
 
     sources_env = os.getenv("TERMINAL_LYRICS_SOURCES", "lrclib")
     sources = tuple(s.strip() for s in sources_env.split(",") if s.strip())
@@ -87,11 +91,15 @@ def load_config() -> AppConfig:
     refresh_hz = float(os.getenv("TERMINAL_LYRICS_REFRESH_HZ", "60.0"))
     context_lines = int(os.getenv("TERMINAL_LYRICS_CONTEXT_LINES", "1"))
     use_alt_screen = os.getenv("TERMINAL_LYRICS_ALT_SCREEN", "1") not in ("0", "false", "False")
+    enable_mouse = os.getenv("TERMINAL_LYRICS_MOUSE", "1") not in ("0", "false", "False")
 
     config_dir = _config_dir()
     lang = _load_lang(config_dir)
     visual = _load_visual_config(config_dir)
     audio = _load_audio_config(config_dir)
+    input_cfg = _load_input_config(config_dir)
+    enable_mouse = input_cfg["enable_mouse"]
+    enable_media_controls = input_cfg["enable_media_controls"]
 
     return AppConfig(
         data_dir=data_dir,
@@ -106,6 +114,8 @@ def load_config() -> AppConfig:
         refresh_hz=refresh_hz,
         context_lines=context_lines,
         use_alt_screen=use_alt_screen,
+        enable_mouse=enable_mouse,
+        enable_media_controls=enable_media_controls,
         visual=visual,
         audio=audio,
     )
@@ -139,7 +149,7 @@ def _load_visual_config(config_dir: Path) -> VisualConfig:
         "show_progress_bar": True,
         "show_metadata": True,
         "show_visualizer": False,
-        "visualizer_style": "spectrum",
+        "visualizer_style": "equalizer",
         "visualizer_position": "top",
         "center_text": True,
         "enable_animations": True,
@@ -202,6 +212,33 @@ def _load_audio_config(config_dir: Path) -> AudioConfig:
         defaults["use_real_audio"] = use_audio not in ("0", "false", "False")
 
     return AudioConfig(**defaults)
+
+
+def _load_input_config(config_dir: Path) -> dict:
+    """Load input configuration from config.json."""
+    cfg_path = config_dir / "config.json"
+    defaults = {
+        "enable_mouse": True,
+        "enable_media_controls": True,
+    }
+
+    if cfg_path.exists():
+        try:
+            data = json.loads(cfg_path.read_text(encoding="utf-8"))
+            input_data = data.get("input", {})
+            if "enable_mouse" in input_data:
+                defaults["enable_mouse"] = bool(input_data["enable_mouse"])
+            if "enable_media_controls" in input_data:
+                defaults["enable_media_controls"] = bool(input_data["enable_media_controls"])
+        except Exception:
+            pass
+
+    # Environment variable overrides config file
+    env_mouse = os.getenv("TERMINAL_LYRICS_MOUSE")
+    if env_mouse is not None:
+        defaults["enable_mouse"] = env_mouse not in ("0", "false", "False")
+
+    return defaults
 
 
 def save_config_lang(lang: str) -> None:
@@ -267,6 +304,26 @@ def save_audio_config(audio: AudioConfig) -> None:
     cfg_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
+def save_input_config(enable_mouse: bool, enable_media_controls: bool) -> None:
+    """Save input configuration to config.json."""
+    cfg_path = _config_file()
+    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+
+    data: dict = {}
+    if cfg_path.exists():
+        try:
+            data = json.loads(cfg_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+    data["input"] = {
+        "enable_mouse": enable_mouse,
+        "enable_media_controls": enable_media_controls,
+    }
+
+    cfg_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
 def list_audio_devices() -> list[dict[str, str | int]]:
     """List available audio input devices."""
     devices = []
@@ -275,7 +332,7 @@ def list_audio_devices() -> list[dict[str, str | int]]:
     try:
         import pulsectl
 
-        pulse = pulsectl.Pulse("terminal-lyrics-list", connect=False)
+        pulse = pulsectl.Pulse("terminal_lyrics-list", connect=False)
         pulse.connect(autospawn=False)
 
         sources = pulse.source_list()

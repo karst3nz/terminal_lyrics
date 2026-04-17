@@ -29,9 +29,9 @@ def setup_logging(debug: bool, log_to_file: bool = False) -> None:
 
     # File handler
     if log_to_file or os.getenv("TERMINAL_LYRICS_LOG_FILE"):
-        log_dir = Path.home() / ".cache" / "terminal-lyrics"
+        log_dir = Path.home() / ".cache" / "terminal_lyrics"
         log_dir.mkdir(parents=True, exist_ok=True)
-        log_file = log_dir / "terminal-lyrics.log"
+        log_file = log_dir / "terminal_lyrics.log"
 
         file_handler = logging.FileHandler(log_file, mode="a", encoding="utf-8")
         file_handler.setLevel(level)
@@ -48,4 +48,4 @@ def setup_logging(debug: bool, log_to_file: bool = False) -> None:
     )
 
     if log_to_file:
-        logging.info(f"Logging to file: {log_dir / 'terminal-lyrics.log'}")
+        logging.info(f"Logging to file: {log_dir / 'terminal_lyrics.log'}")

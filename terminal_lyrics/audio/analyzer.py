@@ -91,7 +91,7 @@ class AudioAnalyzer:
                 return False
 
             try:
-                pulse = pulsectl.Pulse("terminal-lyrics-probe", connect=False)
+                pulse = pulsectl.Pulse("terminal_lyrics-probe", connect=False)
                 pulse.connect(autospawn=False)
             except Exception as e:
                 logger.debug(f"Could not connect to PulseAudio/PipeWire: {e}")
@@ -103,6 +103,7 @@ class AudioAnalyzer:
                 sources = pulse.source_list()
 
                 # If specific device is requested, try to find it
+                
                 if self.device_name:
                     for source in sources:
                         if (
