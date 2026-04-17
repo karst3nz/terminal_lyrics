@@ -208,7 +208,7 @@ class EnhancedRenderer:
             # Ensure no negative padding
             left_pad = max(left_pad, 0)
             right_pad = max(right_pad, 0)
-            centered = " " * left_pad + color + btn_text + self.ansi_theme.reset + " " * right_pad
+            centered = " " * left_pad + color + btn_text + self.ansi_theme.reset + " " * right_pad + self.ansi_theme.border
             parts.append(centered)
         controls = "".join(parts)
         visible_controls_width = _display_width(controls)
@@ -329,7 +329,7 @@ class EnhancedRenderer:
             footer_lines += 4
         body_rows = max(rows - header_lines - footer_lines - 2, 1)  # -2 for top/bottom border
         # Top border
-        out.append(self.ansi_theme.border + draw_box_top(cols, self.border) + self.ansi_theme.reset)
+        out.append(self.ansi_theme.border + draw_box_top(cols, self.border) + self.ansi_theme.reset + self.ansi_theme.border)
         # Visualizer at top
         if (
             self.options.show_visualizer
@@ -338,16 +338,18 @@ class EnhancedRenderer:
         ):
             viz_lines = self.visualizer.render()
             for viz_line in viz_lines:
-                colored_viz = self.ansi_theme.progress_bar_filled + viz_line + self.ansi_theme.reset
+                colored_viz = self.ansi_theme.progress_bar_filled + viz_line + self.ansi_theme.reset + self.ansi_theme.border
                 out.append(
                     self.ansi_theme.border
                     + draw_box_line(colored_viz, cols, self.border, "center")
                     + self.ansi_theme.reset
+                    + self.ansi_theme.border
                 )
             out.append(
                 self.ansi_theme.border
                 + draw_box_separator(cols, self.border)
                 + self.ansi_theme.reset
+                + self.ansi_theme.border
             )
         # Header with metadata
         if self.options.show_metadata:
@@ -368,13 +370,14 @@ class EnhancedRenderer:
                 and self.ansi_theme.gradient_end
             ):
                 # Extract colors from ANSI codes (simplified)
-                title_colored = self.ansi_theme.title + title_text + self.ansi_theme.reset
+                title_colored = self.ansi_theme.title + title_text + self.ansi_theme.reset + self.ansi_theme.border
             else:
-                title_colored = self.ansi_theme.title + title_text + self.ansi_theme.reset
+                title_colored = self.ansi_theme.title + title_text + self.ansi_theme.reset + self.ansi_theme.border
             out.append(
                 self.ansi_theme.border
                 + draw_box_line(title_colored, cols, self.border, "left" if title_overflow else "center")
                 + self.ansi_theme.reset
+                + self.ansi_theme.border
             )
             # Progress bar
             if self.options.show_progress_bar and self.total_duration > 0:
@@ -382,6 +385,7 @@ class EnhancedRenderer:
                     self.ansi_theme.border
                     + draw_box_separator(cols, self.border)
                     + self.ansi_theme.reset
+                    + self.ansi_theme.border
                 )
                 time_current = format_time(self.current_position)
                 time_total = format_time(self.total_duration)
@@ -409,22 +413,26 @@ class EnhancedRenderer:
                     + self.ansi_theme.progress_bar_empty
                     + progress[int(bar_width * (self.current_position / self.total_duration)) :]
                     + self.ansi_theme.reset
+                    + self.ansi_theme.border
                 )
                 progress_line = (
                     status_color
                     + status_icon
                     + self.ansi_theme.reset
+                    + self.ansi_theme.border
                     + " "
                     + progress_colored
                     + " "
                     + self.ansi_theme.time_text
                     + time_str
                     + self.ansi_theme.reset
+                    + self.ansi_theme.border
                 )
                 out.append(
                     self.ansi_theme.border
                     + draw_box_line(progress_line, cols, self.border, "center")
                     + self.ansi_theme.reset
+                    + self.ansi_theme.border
                 )
 
                 # Media control buttons row
@@ -434,11 +442,13 @@ class EnhancedRenderer:
                         self.ansi_theme.border
                         + draw_box_line(controls_line, cols, self.border)
                         + self.ansi_theme.reset
+                        + self.ansi_theme.border
                     )
             out.append(
                 self.ansi_theme.border
                 + draw_box_separator(cols, self.border)
                 + self.ansi_theme.reset
+                + self.ansi_theme.border
             )
         # Lyrics body - expand lines with word wrapping
         if current_idx < 0:
@@ -467,24 +477,25 @@ class EnhancedRenderer:
             if orig_idx == current_idx:
                 # Only add triangle on the first part of the current line
                 prefix = "► " if is_first else "  "
-                styled_text = self.ansi_theme.current_line + prefix + text + self.ansi_theme.reset
+                styled_text = self.ansi_theme.current_line + prefix + text + self.ansi_theme.reset + self.ansi_theme.border
             elif click_highlight_idx is not None and orig_idx == click_highlight_idx:
                 # Briefly highlight clicked lyric line as seek feedback.
                 prefix = "▸ " if is_first else "  "
-                styled_text = self.ansi_theme.warning + prefix + text + self.ansi_theme.reset
+                styled_text = self.ansi_theme.warning + prefix + text + self.ansi_theme.reset + self.ansi_theme.border
             elif hover_highlight_idx is not None and orig_idx == hover_highlight_idx:
                 # Hovered line under mouse pointer.
                 prefix = "▹ " if is_first else "  "
-                styled_text = self.ansi_theme.artist + prefix + text + self.ansi_theme.reset
+                styled_text = self.ansi_theme.artist + prefix + text + self.ansi_theme.reset + self.ansi_theme.border
             elif orig_idx < current_idx:
-                styled_text = self.ansi_theme.past_line + text + self.ansi_theme.reset
+                styled_text = self.ansi_theme.past_line + text + self.ansi_theme.reset + self.ansi_theme.border
             else:
-                styled_text = self.ansi_theme.future_line + text + self.ansi_theme.reset
+                styled_text = self.ansi_theme.future_line + text + self.ansi_theme.reset + self.ansi_theme.border
             align = "center" if self.options.center_text else "left"
             out.append(
                 self.ansi_theme.border
                 + draw_box_line(styled_text, cols, self.border, align)
                 + self.ansi_theme.reset
+                + self.ansi_theme.border
             )
 
         # Fill remaining space
@@ -493,6 +504,7 @@ class EnhancedRenderer:
                 self.ansi_theme.border
                 + draw_box_line("", cols, self.border)
                 + self.ansi_theme.reset
+                + self.ansi_theme.border
             )
         # Visualizer at bottom
         if (
@@ -504,18 +516,20 @@ class EnhancedRenderer:
                 self.ansi_theme.border
                 + draw_box_separator(cols, self.border)
                 + self.ansi_theme.reset
+                + self.ansi_theme.border
             )
             viz_lines = self.visualizer.render()
             for viz_line in viz_lines:
-                colored_viz = self.ansi_theme.progress_bar_filled + viz_line + self.ansi_theme.reset
+                colored_viz = self.ansi_theme.progress_bar_filled + viz_line + self.ansi_theme.reset + self.ansi_theme.border
                 out.append(
                     self.ansi_theme.border
                     + draw_box_line(colored_viz, cols, self.border, "center")
                     + self.ansi_theme.reset
+                    + self.ansi_theme.border
                 )
         # Bottom border
         out.append(
-            self.ansi_theme.border + draw_box_bottom(cols, self.border) + self.ansi_theme.reset
+            self.ansi_theme.border + draw_box_bottom(cols, self.border) + self.ansi_theme.reset + self.ansi_theme.border
         )
         # Render to screen
         sys.stdout.write(CSI + "H" + CSI + "2J")
