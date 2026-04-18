@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from math import log
 from pathlib import Path
+from venv import logger
 import typer
 
 from terminal_lyrics.app import watch as watch_loop
@@ -74,7 +76,6 @@ def watch(
         cfg = cfg.__class__(**{**cfg.__dict__, "context_lines": context_lines})
     if no_alt_screen:
         cfg = cfg.__class__(**{**cfg.__dict__, "use_alt_screen": False})
-
     setup_logging(debug, log_to_file=log_file)
     raise typer.Exit(
         code=watch_loop(cfg, preferred_player=player or cfg.preferred_player, debug=debug)
@@ -229,6 +230,11 @@ def config(
         "--visualizer-style",
         help="Visualizer style: equalizer, waveform, blocks, dots, centered",
     ),
+    visualizer_motion: str | None = typer.Option(
+        None,
+        "--visualizer-motion",
+        help="Visualizer dynamics: responsive (tight, punchy) or smooth (calm, soft)",
+    ),
     center_text: bool | None = typer.Option(
         None, "--center-text/--no-center-text", help="Center lyrics text"
     ),
@@ -277,6 +283,7 @@ def config(
         "show_metadata": cfg.visual.show_metadata,
         "show_visualizer": cfg.visual.show_visualizer,
         "visualizer_style": cfg.visual.visualizer_style,
+        "visualizer_motion": cfg.visual.visualizer_motion,
         "visualizer_position": cfg.visual.visualizer_position,
         "center_text": cfg.visual.center_text,
         "enable_animations": cfg.visual.enable_animations,
@@ -320,6 +327,18 @@ def config(
         visual_changed = True
         typer.echo(f"Visualizer style: {visualizer_style}")
 
+    if visualizer_motion is not None:
+        vm = visualizer_motion.strip().lower()
+        if vm not in ("responsive", "smooth"):
+            typer.echo(
+                "Invalid visualizer motion. Choose: responsive, smooth",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        visual_dict["visualizer_motion"] = vm
+        visual_changed = True
+        typer.echo(f"Visualizer motion: {vm}")
+
     if center_text is not None:
         visual_dict["center_text"] = center_text
         visual_changed = True
@@ -353,6 +372,7 @@ def config(
             progress_bar,
             visualizer,
             visualizer_style,
+            visualizer_motion,
             center_text,
             animations,
             mouse is not None,
@@ -365,6 +385,7 @@ def config(
         typer.echo(f"Progress bar: {'enabled' if cfg.visual.show_progress_bar else 'disabled'}")
         typer.echo(f"Visualizer: {'enabled' if cfg.visual.show_visualizer else 'disabled'}")
         typer.echo(f"Visualizer style: {cfg.visual.visualizer_style}")
+        typer.echo(f"Visualizer motion: {cfg.visual.visualizer_motion}")
         typer.echo(f"Center text: {'enabled' if cfg.visual.center_text else 'disabled'}")
         typer.echo(f"Animations: {'enabled' if cfg.visual.enable_animations else 'disabled'}")
         typer.echo(f"Mouse controls: {'enabled' if cfg.enable_mouse else 'disabled'}")

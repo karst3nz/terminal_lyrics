@@ -24,7 +24,7 @@ from terminal_lyrics.render.layout import (
     get_border_chars,
 )
 from terminal_lyrics.render.themes import ANSITheme, ThemeManager
-from terminal_lyrics.render.visualizer import MusicVisualizer
+from terminal_lyrics.render.visualizer import MusicVisualizer, VisualizerMotion
 
 CSI = "\x1b["
 
@@ -42,6 +42,7 @@ class WizardState:
     show_progress_bar: bool
     show_visualizer: bool
     visualizer_style: VisualizerStyle
+    visualizer_motion: VisualizerMotion
     center_text: bool
     enable_animations: bool
     enable_mouse: bool
@@ -58,6 +59,7 @@ class WizardState:
             show_progress_bar=cfg.visual.show_progress_bar,
             show_visualizer=cfg.visual.show_visualizer,
             visualizer_style=cfg.visual.visualizer_style,
+            visualizer_motion=cfg.visual.visualizer_motion,
             center_text=cfg.visual.center_text,
             enable_animations=cfg.visual.enable_animations,
             enable_mouse=cfg.enable_mouse,
@@ -74,6 +76,7 @@ class WizardState:
             show_metadata=current_visual.show_metadata,
             show_visualizer=self.show_visualizer,
             visualizer_style=self.visualizer_style,
+            visualizer_motion=self.visualizer_motion,
             visualizer_position=current_visual.visualizer_position,
             center_text=self.center_text,
             enable_animations=self.enable_animations,
@@ -151,6 +154,8 @@ def _status_for(item: MenuItem, state: WizardState) -> str:
     if item.kind == "toggle":
         return item.on_label if bool(value) else item.off_label
     if item.kind == "cycle":
+        if item.key == "visualizer_motion":
+            return t(f"visualizer_motion_{value}")
         return str(value)
     return ""
 
@@ -179,6 +184,37 @@ def _preview_lines(theme: ANSITheme, state: WizardState, width: int, now_s: floa
     lines: list[str] = []
     lines.append(theme.border + draw_box_top(width, border) + theme.reset)
 
+    if state.show_visualizer:
+        visualizer = MusicVisualizer(
+            # Keep preview parameters aligned with EnhancedRenderer.
+            width=20,
+            height=5,
+            style=state.visualizer_style,
+            use_real_audio=False,
+            waveform_style="detailed",
+            motion=state.visualizer_motion,
+        )
+        try:
+            # Warm up several ticks to make preview more expressive immediately.
+            for _ in range(4):
+                visualizer.update(True)
+
+            viz_lines = visualizer.render()
+            total_viz_rows = max(1, len(viz_lines))
+            for row_idx, vline in enumerate(viz_lines):
+                # Top rows brighter, lower rows softer for better depth perception.
+                if row_idx < total_viz_rows // 3:
+                    row_color = theme.status_playing
+                elif row_idx < (2 * total_viz_rows) // 3:
+                    row_color = theme.progress_bar_filled
+                else:
+                    row_color = theme.time_text
+                colored = row_color + vline + theme.reset
+                lines.append(theme.border + draw_box_line(colored, width, border, "center") + theme.reset)
+                
+        finally:
+            visualizer.cleanup()
+    lines.append(theme.border + draw_box_separator(width, border) + theme.reset)
     title = f"{theme.title}{ICON_MUSIC} {t('wizard_preview_title')}{theme.reset}"
     lines.append(theme.border + draw_box_line(title, width, border, "center") + theme.reset)
     lines.append(theme.border + draw_box_separator(width, border) + theme.reset)
@@ -206,35 +242,6 @@ def _preview_lines(theme: ANSITheme, state: WizardState, width: int, now_s: floa
     for lyric in lyrics:
         lines.append(theme.border + draw_box_line(lyric, width, border, align) + theme.reset)
 
-    if state.show_visualizer:
-        lines.append(theme.border + draw_box_separator(width, border) + theme.reset)
-        visualizer = MusicVisualizer(
-            # Keep preview parameters aligned with EnhancedRenderer.
-            width=20,
-            height=3,
-            style=state.visualizer_style,
-            use_real_audio=False,
-            waveform_style="detailed",
-        )
-        try:
-            # Warm up several ticks to make preview more expressive immediately.
-            for _ in range(4):
-                visualizer.update(True)
-
-            viz_lines = visualizer.render()
-            total_viz_rows = max(1, len(viz_lines))
-            for row_idx, vline in enumerate(viz_lines):
-                # Top rows brighter, lower rows softer for better depth perception.
-                if row_idx < total_viz_rows // 3:
-                    row_color = theme.status_playing
-                elif row_idx < (2 * total_viz_rows) // 3:
-                    row_color = theme.progress_bar_filled
-                else:
-                    row_color = theme.time_text
-                colored = row_color + vline + theme.reset
-                lines.append(theme.border + draw_box_line(colored, width, border, "center") + theme.reset)
-        finally:
-            visualizer.cleanup()
 
     lines.append(theme.border + draw_box_bottom(width, border) + theme.reset)
     return lines
@@ -261,6 +268,12 @@ def run_setup_tui(cfg, *, theme_manager: ThemeManager) -> tuple[str, VisualConfi
             "wizard_menu_visualizer_style",
             "cycle",
             ("equalizer", "waveform", "blocks", "dots", "centered"),
+        ),
+        MenuItem(
+            "visualizer_motion",
+            "wizard_menu_visualizer_motion",
+            "cycle",
+            ("responsive", "smooth"),
         ),
         MenuItem("show_progress_bar", "wizard_menu_progress_bar", "toggle", on_label=on_label, off_label=off_label),
         MenuItem("center_text", "wizard_menu_center_text", "toggle", on_label=on_label, off_label=off_label),

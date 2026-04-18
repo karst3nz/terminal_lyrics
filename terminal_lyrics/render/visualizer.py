@@ -3,10 +3,85 @@ from __future__ import annotations
 import math
 import random
 import time
+from dataclasses import dataclass
 from typing import Literal, Optional
 
 
 VisualizerStyle = Literal["equalizer", "waveform", "blocks", "dots", "centered"]
+VisualizerMotion = Literal["responsive", "smooth"]
+
+
+# ---------------------------------------------------------------------------
+# Spectral bar display model (real audio)
+#
+# The analyzer passes f_i ∈ [0, 1], the fraction of total short-time spectral energy
+# falling into band i. For a clean partition, sum_i f_i ≈ 1 (no per-frame max norm).
+#
+# Height mapping uses a concave g so weak bands are still visible without one band
+# always pegging the scale:
+#   g(f) = ln(1 + k·f) / ln(1 + k),  f ∈ [0,1],  g(0)=0, g(1)=1.
+#
+# Column height: h = min(H, g(f)·H·impact); transient term adds punch on sharp Δf without exceeding H.
+# Temporal behavior is chosen per motion preset (responsive vs smooth).
+# ---------------------------------------------------------------------------
+@dataclass(frozen=True, slots=True)
+class _VisualizerDynamics:
+    spectral_map_k: float
+    display_impact: float
+    transient_punch: float
+    smooth_attack: float
+    smooth_release: float
+    bass_release_boost: float
+    silence_gate: float
+    mid_band_blur_from: int
+    blur_left: float
+    blur_center: float
+    blur_right: float
+    decay_no_data: float
+    decay_silence: float
+    decay_paused: float
+
+
+_MOTION_PRESETS: dict[VisualizerMotion, _VisualizerDynamics] = {
+    "responsive": _VisualizerDynamics(
+        spectral_map_k=52.0,
+        display_impact=1.12,
+        transient_punch=0.74,
+        smooth_attack=0.88,
+        smooth_release=0.48,
+        bass_release_boost=1.22,
+        silence_gate=3e-10,
+        mid_band_blur_from=7,
+        blur_left=0.12,
+        blur_center=0.76,
+        blur_right=0.12,
+        decay_no_data=0.82,
+        decay_silence=0.83,
+        decay_paused=0.78,
+    ),
+    "smooth": _VisualizerDynamics(
+        spectral_map_k=44.0,
+        display_impact=0.98,
+        transient_punch=0.35,
+        smooth_attack=0.48,
+        smooth_release=0.22,
+        bass_release_boost=1.08,
+        silence_gate=3e-10,
+        mid_band_blur_from=5,
+        blur_left=0.18,
+        blur_center=0.64,
+        blur_right=0.18,
+        decay_no_data=0.90,
+        decay_silence=0.91,
+        decay_paused=0.88,
+    ),
+}
+
+
+def _resolve_visualizer_motion(motion: str) -> VisualizerMotion:
+    if motion == "smooth":
+        return "smooth"
+    return "responsive"
 
 
 class MusicVisualizer:
@@ -21,13 +96,18 @@ class MusicVisualizer:
         audio_device: Optional[str] = None,
         audio_backend: str = "auto",
         waveform_style: Literal["simple", "detailed"] = "detailed",
+        motion: VisualizerMotion | str = "responsive",
     ):
         self.width = width
         self.height = height
         self.style = style
         self.waveform_style = waveform_style
+        self._motion = _resolve_visualizer_motion(str(motion))
+        self._dyn = _MOTION_PRESETS[self._motion]
         self.start_time = time.time()
         self.bars: list[int] = [0] * width
+        self._smooth_levels: list[float] = [0.0] * width
+        self._prev_raw_targets: list[float] = [0.0] * width
         self.phase = 0.0
         self.use_real_audio = use_real_audio
         self.audio_analyzer = None
@@ -49,7 +129,10 @@ class MusicVisualizer:
     def update(self, is_playing: bool = True) -> None:
         """Update visualizer state."""
         if not is_playing:
-            self.bars = [max(0, int(b * 0.85)) for b in self.bars]
+            dp = self._dyn.decay_paused
+            for i in range(self.width):
+                self._smooth_levels[i] *= dp
+                self.bars[i] = max(0, int(round(self._smooth_levels[i])))
             return
 
         t = time.time() - self.start_time
@@ -60,60 +143,136 @@ class MusicVisualizer:
         else:
             self._update_simulation(t)
 
-    def _update_from_audio(self):
-        """Update bars from real audio data."""
+    def _spectral_fraction_to_height(self, frac: float) -> float:
+        """Map energy fraction f ∈ [0,1] to target bar height in rows (concave in f)."""
+        k = self._dyn.spectral_map_k
+        impact = self._dyn.display_impact
+        height = self.height
+        f = max(0.0, min(1.0, frac))
+        g = math.log1p(k * f) / math.log1p(k)
+        return min(float(height), g * float(height) * impact)
+
+    def _blur_upper_bands(self, values: list[float], from_index: int) -> list[float]:
+        """3-tap blur on indices >= from_index; lower indices unchanged (no bass bleed)."""
+        n = len(values)
+        if n <= 2 or from_index >= n:
+            return list(values)
+        wL, wC, wR = self._dyn.blur_left, self._dyn.blur_center, self._dyn.blur_right
+        out = list(values)
+        for i in range(from_index, n):
+            left = values[i - 1]
+            center = values[i]
+            right = values[i + 1] if i < n - 1 else values[i]
+            out[i] = wL * left + wC * center + wR * right
+        return out
+
+    def _apply_transient_punch(self, raw_targets: list[float]) -> list[float]:
+        """Boost columns when the spectral target jumps up sharply (beats, snares)."""
+        out: list[float] = []
+        cap = float(self.height)
+        for i in range(self.width):
+            prev = self._prev_raw_targets[i]
+            raw = raw_targets[i]
+            rise = max(0.0, raw - prev)
+            self._prev_raw_targets[i] = raw
+            punched = min(cap, raw + rise * self._dyn.transient_punch)
+            out.append(punched)
+        return out
+
+    def _apply_level_smoothing(self, targets: list[float]) -> None:
+        """EMA toward per-column target heights; bass rows decay slightly faster on the way down."""
+        d = self._dyn
+        hmax = self.height
+        for i in range(self.width):
+            tgt = targets[i]
+            cur = self._smooth_levels[i]
+            k = d.smooth_attack if tgt > cur else d.smooth_release
+            if i < 4 and tgt < cur:
+                k = min(1.0, d.smooth_release * d.bass_release_boost)
+            cur = cur + (tgt - cur) * k
+            self._smooth_levels[i] = cur
+            self.bars[i] = max(0, min(int(round(cur)), hmax))
+
+    def _decay_smoothed(self, factor: float) -> None:
+        hmax = self.height
+        for i in range(self.width):
+            self._smooth_levels[i] *= factor
+            self.bars[i] = max(0, min(int(round(self._smooth_levels[i])), hmax))
+
+    def _update_from_audio(self) -> None:
+        """fraction of spectrum per band → target heights → temporal smoothing."""
         try:
             frequency_data = self.audio_analyzer.get_frequency_data()
 
-            if not frequency_data or all(v == 0.0 for v in frequency_data):
+            if not frequency_data:
+                self._decay_smoothed(self._dyn.decay_no_data)
                 return
 
-            for i in range(min(self.width, len(frequency_data))):
-                raw = frequency_data[i]  # уже [0..1]
+            n_in = len(frequency_data)
+            frac = [max(0.0, float(frequency_data[i])) for i in range(min(n_in, self.width))]
+            if len(frac) < self.width:
+                frac.extend([0.0] * (self.width - len(frac)))
 
-                # Логарифмическое масштабирование — ближе к восприятию на слух
-                # +epsilon чтобы не было log(0)
-                boosted = math.log1p(raw * 40) / math.log1p(10)  # [0..1] → [0..1]
+            peak = max(frac) if frac else 0.0
+            if peak < self._dyn.silence_gate:
+                self._decay_smoothed(self._dyn.decay_silence)
+                return
 
-                target = int(boosted * self.height)
+            frac = self._blur_upper_bands(frac, self._dyn.mid_band_blur_from)
+            s = sum(frac)
+            if s > 0:
+                frac = [x / s for x in frac]
 
-                current = self.bars[i]
+            raw_targets = [self._spectral_fraction_to_height(f) for f in frac]
+            targets = self._apply_transient_punch(raw_targets)
 
-                if target > current:
-                    self.bars[i] = int(current * 0.2 + target * 0.8)  # быстрый подъём
-                else:
-                    self.bars[i] = int(current * 0.85 + target * 0.15)  # плавный спад
+            self._apply_level_smoothing(targets)
 
         except Exception:
             self._update_simulation(time.time() - self.start_time)
 
-    def _update_simulation(self, t: float):
-        """Update bars with simulated audio data."""
+    def _update_simulation(self, t: float) -> None:
+        """Synthetic energy per band, renormalized to fractions (same mapping as real audio)."""
+        energy: list[float] = []
         for i in range(self.width):
-            bass_freq = 0.8 + math.sin(t * 0.3) * 0.2
-            mid_freq = 2.0 + math.sin(t * 0.5) * 0.5
-            treble_freq = 4.0 + math.sin(t * 0.7) * 1.0
+            bass_freq = 0.9 + math.sin(t * 0.35) * 3.2
+            mid_freq = 2.2 + math.sin(t * 0.55) * 4.5
+            treble_freq = 4.5 + math.sin(t * 0.85) * 8.0
 
             pos_ratio = i / max(1, self.width - 1)
 
-            bass = (math.sin(t * bass_freq * 2 * math.pi + i * 0.1) + 1) / 2
-            bass *= 1.0 - pos_ratio * 0.7
+            bass = (math.sin(t * bass_freq * 2 * math.pi + i * 0.12) + 1) / 2
+            bass *= 1.0 - pos_ratio * 0.65
 
-            mid = (math.sin(t * mid_freq * 2 * math.pi + i * 0.3) + 1) / 2
-            mid *= 1.0 - abs(pos_ratio - 0.5) * 0.5
+            mid = (math.sin(t * mid_freq * 2 * math.pi + i * 0.35) + 1) / 2
+            mid *= 1.0 - abs(pos_ratio - 0.5) * 0.48
 
-            treble = (math.sin(t * treble_freq * 2 * math.pi + i * 0.5) + 1) / 2
-            treble *= pos_ratio * 0.8
+            treble = (math.sin(t * treble_freq * 2 * math.pi + i * 0.55) + 1) / 2
+            treble *= pos_ratio * 0.85
 
-            combined = (bass * 0.4 + mid * 0.35 + treble * 0.25) * 0.9
-            combined += random.random() * 0.1
+            shimmer = 0.18 * math.sin(t * 11.0 + i * 0.9)
+            combined = (bass * 0.38 + mid * 0.36 + treble * 0.26) * 1.02 + shimmer
+            combined += random.random() * 0.16
 
-            if random.random() > 0.95:
-                combined = min(1.0, combined + random.random() * 0.3)
+            if random.random() > 0.82:
+                combined = min(1.2, combined + random.random() * 0.55)
 
-            target = int(combined * (self.height + 2))
-            current = self.bars[i]
-            self.bars[i] = int(current * 0.6 + target * 0.4)
+            energy.append(max(0.0, combined))
+
+        s = sum(energy)
+        if s <= 1e-12:
+            fracs = [1.0 / self.width] * self.width
+        else:
+            fracs = [e / s for e in energy]
+
+        fracs = self._blur_upper_bands(fracs, self._dyn.mid_band_blur_from)
+        s2 = sum(fracs)
+        if s2 > 0:
+            fracs = [x / s2 for x in fracs]
+
+        raw_targets = [self._spectral_fraction_to_height(f) for f in fracs]
+        targets = self._apply_transient_punch(raw_targets)
+        self._apply_level_smoothing(targets)
 
     def cleanup(self) -> None:
         """Cleanup resources, stop audio analyzer if running."""
@@ -255,16 +414,24 @@ class MusicVisualizer:
         return lines
 
     def _render_blocks(self) -> list[str]:
-        """Render chunky unicode blocks with height quantization."""
+        """Bars grow bottom-up; full rows use █, the top row uses ▁▂▃▄▅▆▇ for the fraction."""
+        shades = "▁▂▃▄▅▆▇█"
+        n = len(shades)
         lines: list[str] = []
-        shades = " ▁▂▃▄▅▆▇█"
-        max_level = len(shades) - 1
+        cap = max(float(self.height), 1.0)
+
         for row in range(self.height - 1, -1, -1):
             line = ""
             for bar_height in self.bars:
-                level = int(max(0, min(max_level, (bar_height / max(1, self.height)) * max_level)))
-                threshold = int((row / max(1, self.height - 1)) * max_level)
-                line += shades[level] if level >= threshold else " "
+                bh = float(min(max(bar_height, 0), cap * 2))
+                if bh <= row:
+                    line += " "
+                elif bh >= row + 1:
+                    line += "█"
+                else:
+                    rem = bh - row
+                    idx = min(int(rem * n), n - 1)
+                    line += shades[idx]
             lines.append(line)
         return lines
 

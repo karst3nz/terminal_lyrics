@@ -83,6 +83,7 @@ class RenderOptions:
     audio_device: str | None = None  # Audio device name
     audio_backend: str = "auto"  # Audio backend
     waveform_style: str = "detailed"  # Waveform rendering style: "simple" or "detailed"
+    visualizer_motion: str = "responsive"  # responsive | smooth (spectral dynamics preset)
 
 
 class EnhancedRenderer:
@@ -99,6 +100,7 @@ class EnhancedRenderer:
         self._entered = False
         self._resize_handler: Callable[..., None] | None = None
         self._last_render_args: tuple | None = None
+        self._pending_resize = False
         # Load theme
         from pathlib import Path
 
@@ -119,6 +121,7 @@ class EnhancedRenderer:
                 audio_device=self.options.audio_device,
                 audio_backend=self.options.audio_backend,
                 waveform_style=self.options.waveform_style,
+                motion=self.options.visualizer_motion,
             )
             self.simple_visualizer = SimpleVisualizer(style="equalizer", speed=5.0)
         else:
@@ -146,10 +149,10 @@ class EnhancedRenderer:
         sys.stdout.flush()
         self._entered = True
 
-        # Register SIGWINCH handler for resize
+        # Register SIGWINCH handler for resize (must not call render() here — stdout is
+        # not re-entrant if a resize arrives mid-write).
         def _on_resize(signum=None, frame=None):
-            if self._last_render_args:
-                self.render(*self._last_render_args)
+            self._pending_resize = True
 
         self._resize_handler = _on_resize
         signal.signal(signal.SIGWINCH, _on_resize)
@@ -171,6 +174,7 @@ class EnhancedRenderer:
         sys.stdout.flush()
         self._entered = False
         self._last_render_args = None
+        self._pending_resize = False
 
     def _render_media_controls(self, cols: int) -> str:
         """Render media control buttons row: prev, play/pause, next."""
@@ -536,6 +540,9 @@ class EnhancedRenderer:
         sys.stdout.write("\n".join(out))
         sys.stdout.write(self.ansi_theme.reset)
         sys.stdout.flush()
+        if self._pending_resize and self._last_render_args:
+            self._pending_resize = False
+            self.render(*self._last_render_args)
 
 
 class AnsiRenderer:
@@ -548,6 +555,7 @@ class AnsiRenderer:
         self._resize_handler: Callable[..., None] | None = None
         self._last_render_args: tuple[str, list[str], int, int] | None = None
         self._last_scroll_offset: int = 0
+        self._pending_resize = False
 
     def __setattr__(self, name: str, value) -> None:
         """
@@ -586,11 +594,10 @@ class AnsiRenderer:
         sys.stdout.flush()
         self._entered = True
 
-        # Register SIGWINCH handler for resize
+        # Register SIGWINCH handler for resize (must not call render() here — stdout is
+        # not re-entrant if a resize arrives mid-write).
         def _on_resize(signum=None, frame=None):
-            if self._last_render_args:
-                title, lines, current_idx, context_lines = self._last_render_args
-                self.render(title, lines, current_idx, context_lines, self._last_scroll_offset)
+            self._pending_resize = True
 
         self._resize_handler = _on_resize
         signal.signal(signal.SIGWINCH, _on_resize)
@@ -610,6 +617,7 @@ class AnsiRenderer:
         self._entered = False
         self._last_render_args = None
         self._last_scroll_offset = 0
+        self._pending_resize = False
 
     def render(
         self,
@@ -646,3 +654,7 @@ class AnsiRenderer:
         sys.stdout.write("\n".join(out))
         sys.stdout.write(self.theme.reset)
         sys.stdout.flush()
+        if self._pending_resize and self._last_render_args:
+            self._pending_resize = False
+            title, lines, current_idx, context_lines = self._last_render_args
+            self.render(title, lines, current_idx, context_lines, self._last_scroll_offset)

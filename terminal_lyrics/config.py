@@ -28,6 +28,7 @@ class VisualConfig:
     show_metadata: bool = True
     show_visualizer: bool = False
     visualizer_style: Literal["equalizer", "waveform", "blocks", "dots", "centered"] = "equalizer"
+    visualizer_motion: Literal["responsive", "smooth"] = "responsive"
     visualizer_position: Literal["top", "bottom", "off"] = "top"
     center_text: bool = True
     enable_animations: bool = True
@@ -88,7 +89,7 @@ def load_config() -> AppConfig:
     sources_env = os.getenv("TERMINAL_LYRICS_SOURCES", "lrclib")
     sources = tuple(s.strip() for s in sources_env.split(",") if s.strip())
 
-    refresh_hz = float(os.getenv("TERMINAL_LYRICS_REFRESH_HZ", "60.0"))
+    refresh_hz = float(os.getenv("TERMINAL_LYRICS_REFRESH_HZ", "1000.0"))
     context_lines = int(os.getenv("TERMINAL_LYRICS_CONTEXT_LINES", "1"))
     use_alt_screen = os.getenv("TERMINAL_LYRICS_ALT_SCREEN", "1") not in ("0", "false", "False")
     enable_mouse = os.getenv("TERMINAL_LYRICS_MOUSE", "1") not in ("0", "false", "False")
@@ -150,6 +151,7 @@ def _load_visual_config(config_dir: Path) -> VisualConfig:
         "show_metadata": True,
         "show_visualizer": False,
         "visualizer_style": "equalizer",
+        "visualizer_motion": "responsive",
         "visualizer_position": "top",
         "center_text": True,
         "enable_animations": True,
@@ -176,6 +178,19 @@ def _load_visual_config(config_dir: Path) -> VisualConfig:
         defaults["border_style"] = border
     if visualizer := os.getenv("TERMINAL_LYRICS_VISUALIZER"):
         defaults["show_visualizer"] = visualizer not in ("0", "false", "False")
+
+    _valid_viz_styles = frozenset({"equalizer", "waveform", "blocks", "dots", "centered"})
+    if defaults.get("visualizer_style") not in _valid_viz_styles:
+        defaults["visualizer_style"] = "equalizer"
+
+    _valid_viz_motion = frozenset({"responsive", "smooth"})
+    if defaults.get("visualizer_motion") not in _valid_viz_motion:
+        defaults["visualizer_motion"] = "responsive"
+
+    if env_motion := os.getenv("TERMINAL_LYRICS_VISUALIZER_MOTION"):
+        em = env_motion.strip().lower()
+        if em in _valid_viz_motion:
+            defaults["visualizer_motion"] = em
 
     return VisualConfig(**defaults)
 
@@ -273,6 +288,7 @@ def save_visual_config(visual: VisualConfig) -> None:
         "show_metadata": visual.show_metadata,
         "show_visualizer": visual.show_visualizer,
         "visualizer_style": visual.visualizer_style,
+        "visualizer_motion": visual.visualizer_motion,
         "visualizer_position": visual.visualizer_position,
         "center_text": visual.center_text,
         "enable_animations": visual.enable_animations,

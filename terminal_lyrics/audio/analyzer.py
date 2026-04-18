@@ -440,17 +440,28 @@ class AudioAnalyzer:
     def _analyze_audio(self, audio_data):
         """Analyze audio data and extract frequency bands."""
         try:
+            samples = np.asarray(audio_data, dtype=np.float32)
+            # Remove DC offset — otherwise FFT bin 0 looks like constant low-frequency energy.
+            if samples.size >= 1:
+                samples = samples - np.mean(samples)
+            if samples.size >= 4:
+                samples = samples * np.hanning(samples.size)
+
             # Apply FFT
-            fft_data = np.fft.rfft(audio_data)
+            fft_data = np.fft.rfft(samples)
             fft_magnitude = np.abs(fft_data)
+            # Bin 0 is DC; numerical residue can still leak a little after mean removal.
+            fft_magnitude[0] = 0.0
 
-            # Don't normalize by max - preserve relative band energy
-            # Instead, scale by total energy for consistency across volume levels
-            total_energy = np.sum(fft_magnitude)
-            if total_energy > 0:
-                fft_magnitude = fft_magnitude / total_energy
+            # Power spectrum (|X|^2), then normalize to a probability mass over bins so that
+            # disjoint band sums are fractions of total energy (sum of band values ≈ 1).
+            fft_power = np.asarray(fft_magnitude, dtype=np.float64) ** 2
+            fft_power[0] = 0.0
+            total_power = float(np.sum(fft_power))
+            if total_power > 0:
+                fft_power = fft_power / total_power
 
-            fft_len = len(fft_magnitude)  # = chunk_size + 1
+            fft_len = len(fft_power)  # = chunk_size + 1
             sample_rate = self.sample_rate
             nyquist = sample_rate / 2  # max representable frequency
 
@@ -480,16 +491,12 @@ class AudioAnalyzer:
                 end_bin = min(fft_len - 1, int(end_hz / nyquist * (fft_len - 1)))
 
                 if end_bin > start_bin:
-                    band_data = fft_magnitude[start_bin:end_bin]
+                    band_data = fft_power[start_bin:end_bin]
+                    # Fraction of total spectral energy in this band (partition sums to ~1).
                     band_value = float(np.sum(band_data))
                     bands.append(band_value)
                 else:
                     bands.append(0.0)
-
-            # Normalize bands relative to each other (max band = 1.0)
-            max_band = max(bands) if bands else 0
-            if max_band > 0:
-                bands = [b / max_band for b in bands]
 
             # Update frequency data with lock
             with self.lock:
@@ -499,7 +506,7 @@ class AudioAnalyzer:
             logger.debug(f"Error analyzing audio: {e}")
 
     def get_frequency_data(self) -> list[float]:
-        """Get current frequency band data."""
+        """Per-band fraction of short-time spectral energy (sum ≈ 1 over bands)."""
         with self.lock:
             return self.frequency_data.copy()
 

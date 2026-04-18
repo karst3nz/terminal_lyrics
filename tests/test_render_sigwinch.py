@@ -44,7 +44,7 @@ class TestAnsiRendererSigwinch:
         signal.signal(signal.SIGWINCH, old_handler)  # restore
     
     def test_sigwinch_redraws_last_frame(self):
-        """Test that SIGWINCH triggers redraw of last rendered frame."""
+        """SIGWINCH sets a pending flag; the next render() call performs the redraw."""
         renderer = AnsiRenderer(use_alt_screen=False)
         
         with patch.object(renderer, "render") as mock_render:
@@ -56,11 +56,13 @@ class TestAnsiRendererSigwinch:
             # Verify render was called
             assert mock_render.call_count >= 1
             
-            # Simulate SIGWINCH
+            # Simulate SIGWINCH (handler must not call render — avoids reentrant stdout)
             if renderer._resize_handler:
                 renderer._resize_handler()
+            assert renderer._pending_resize is True
             
-            # Should have been called again (at least once more)
+            # Next frame from the watch loop invokes render again
+            renderer.render("Test", ["Line 1", "Line 2"], current_idx=0, context_lines=1)
             assert mock_render.call_count >= 2
             
             renderer.exit()
@@ -83,3 +85,14 @@ class TestAnsiRendererSigwinch:
         
         renderer.exit()
         assert renderer._last_render_args is None
+
+    def test_sigwinch_pending_redraw_tail_does_not_reenter_stdout(self):
+        """Pending resize is applied after flush, avoiding nested writes to stdout."""
+        renderer = AnsiRenderer(use_alt_screen=False)
+        renderer.enter()
+        with patch("sys.stdout.write"), patch("sys.stdout.flush"):
+            renderer._resize_handler()
+            assert renderer._pending_resize is True
+            renderer.render("T", ["line"], current_idx=0, context_lines=1)
+            assert renderer._pending_resize is False
+        renderer.exit()

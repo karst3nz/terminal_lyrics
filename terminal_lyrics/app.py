@@ -203,6 +203,7 @@ def watch(cfg: AppConfig, *, preferred_player: str | None, debug: bool) -> int:
         show_media_controls=cfg.enable_media_controls,
         show_visualizer=cfg.visual.show_visualizer,
         visualizer_style=cfg.visual.visualizer_style,
+        visualizer_motion=cfg.visual.visualizer_motion,
         visualizer_position=cfg.visual.visualizer_position,
         center_text=cfg.visual.center_text,
         enable_animations=cfg.visual.enable_animations,
@@ -213,7 +214,6 @@ def watch(cfg: AppConfig, *, preferred_player: str | None, debug: bool) -> int:
         audio_backend=cfg.audio.audio_backend,
         waveform_style="detailed",  # Can be configured later
     )
-
     # Use enhanced renderer
     renderer = EnhancedRenderer(
         use_alt_screen=cfg.use_alt_screen,
@@ -225,7 +225,7 @@ def watch(cfg: AppConfig, *, preferred_player: str | None, debug: bool) -> int:
     # Initialize mouse handler if enabled
     mouse_handler = None
     if cfg.enable_mouse:
-        logger.debug("Mouse support enabled, initializing handler...")
+        logger.debug(f"Mouse support enabled, initializing handler...")
         try:
             from terminal_lyrics.mouse_input import MouseControlsHandler, MouseProtocol
 
