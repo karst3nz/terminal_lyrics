@@ -1,7 +1,9 @@
 colorama
 regex
 dbus-python
-requests
+httpx
+aiosqlite
+aiohttp
 typer
 numpy
 pulsectl

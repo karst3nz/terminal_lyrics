@@ -28,6 +28,7 @@ terminal_lyrics/lrc/export.py
 terminal_lyrics/lrc/model.py
 terminal_lyrics/lrc/parse.py
 terminal_lyrics/mpris/__init__.py
+terminal_lyrics/mpris/async_dbus.py
 terminal_lyrics/mpris/client.py
 terminal_lyrics/mpris/errors.py
 terminal_lyrics/render/__init__.py
@@ -47,13 +48,13 @@ terminal_lyrics/sources/types.py
 terminal_lyrics/sync/__init__.py
 terminal_lyrics/sync/tracker.py
 tests/__init__.py
+tests/mpris_capabilities_manual.py
 tests/test_app_with_mock.py
 tests/test_export.py
 tests/test_i18n_config.py
 tests/test_local_ingest.py
 tests/test_lyrics_parsing.py
 tests/test_mpris.py
-tests/test_mpris_capabilities.py
 tests/test_mpris_unit.py
 tests/test_placeholder_fallback.py
 tests/test_render_mocked.py

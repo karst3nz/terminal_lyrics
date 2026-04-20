@@ -8,12 +8,13 @@ new service and writes a copy into XDG cache dir, returning the file path.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from pathlib import Path
 
 from terminal_lyrics.config import load_config
-from terminal_lyrics.mpris.client import MprisClient
+from terminal_lyrics.mpris import async_dbus as mpris_async
 from terminal_lyrics.mpris.errors import NoPlayersFound, PlayerUnavailable
 from terminal_lyrics.sources.service import LyricsService
 from terminal_lyrics.sources.types import TrackKey
@@ -29,17 +30,17 @@ def _sanitize_filename(s: str) -> str:
     return s2 or "unknown"
 
 
-def get_lyrics() -> str | None:
+async def _get_lyrics_async() -> str | None:
     cfg = load_config()
     svc = LyricsService(cfg)
 
     try:
-        client = MprisClient.pick_player(preferred=cfg.preferred_player)
+        service_name = await mpris_async.pick_player_service_name(preferred=cfg.preferred_player)
     except NoPlayersFound:
         return None
 
     try:
-        ti = client.track_info()
+        ti = await mpris_async.track_info(service_name)
     except PlayerUnavailable as e:
         logger.warning("MPRIS unavailable: %s", e)
         return None
@@ -48,7 +49,7 @@ def get_lyrics() -> str | None:
         return None
 
     track = TrackKey(artist=ti.artist, title=ti.title, album=ti.album)
-    res = svc.get_lyrics(track)
+    res = await svc.get_lyrics(track)
     if not res.has_lyrics or not res.lrc_text:
         return None
 
@@ -57,3 +58,7 @@ def get_lyrics() -> str | None:
     out_path = out_dir / f"{_sanitize_filename(ti.artist)} - {_sanitize_filename(ti.title)}.lrc"
     out_path.write_text(res.lrc_text, encoding="utf-8")
     return str(out_path)
+
+
+def get_lyrics() -> str | None:
+    return asyncio.run(_get_lyrics_async())

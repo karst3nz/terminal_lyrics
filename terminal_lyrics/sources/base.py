@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 from .types import TrackKey
@@ -12,9 +13,9 @@ class FetchResult:
     source: str
 
 
-class LyricsSource:
+class LyricsSource(ABC):
     name: str
 
-    def fetch(self, track: TrackKey) -> FetchResult:
+    @abstractmethod
+    async def fetch(self, track: TrackKey) -> FetchResult:
         raise NotImplementedError
-

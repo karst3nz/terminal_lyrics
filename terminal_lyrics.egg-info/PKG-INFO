@@ -23,7 +23,9 @@ Description-Content-Type: text/markdown
 Requires-Dist: colorama
 Requires-Dist: regex
 Requires-Dist: dbus-python
-Requires-Dist: requests
+Requires-Dist: httpx
+Requires-Dist: aiosqlite
+Requires-Dist: aiohttp
 Requires-Dist: typer
 Requires-Dist: numpy
 Requires-Dist: pulsectl

@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import numpy as np
-import threading
-import time
-from typing import Optional, Literal
+import asyncio
 import logging
+import threading
+from typing import Literal, Optional
+
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +15,7 @@ AudioBackend = Literal["pulsectl", "sounddevice", "pyaudio", "none"]
 
 
 class AudioAnalyzer:
-    """Captures and analyzes audio data for visualization."""
+    """Captures and analyzes audio data for visualization (asyncio-driven capture)."""
 
     def __init__(
         self,
@@ -30,11 +31,11 @@ class AudioAnalyzer:
         self.device_name = device_name
         self.preferred_backend = preferred_backend
         self.running = False
-        self.thread: Optional[threading.Thread] = None
+        self._capture_task: asyncio.Task[None] | None = None
 
-        # Audio data
+        # Audio data (sounddevice callback runs off-loop → keep a threading lock)
         self.frequency_data: list[float] = [0.0] * num_bands
-        self.lock = threading.Lock()
+        self._freq_lock = threading.Lock()
 
         # Audio backend
         self.audio_available = False
@@ -43,12 +44,14 @@ class AudioAnalyzer:
         self.pulse = None
         self.monitor_source_name: Optional[str] = None
 
+        self._parec_proc: asyncio.subprocess.Process | None = None
+        self._sd_stream = None
+
         self._init_audio()
 
     def _init_audio(self):
         """Initialize audio capture library with priority: pulsectl > sounddevice > pyaudio."""
 
-        # If specific backend is requested, try only that one
         if self.preferred_backend == "pulsectl":
             if self._try_init_pulsectl():
                 return
@@ -59,15 +62,10 @@ class AudioAnalyzer:
             if self._try_init_pyaudio():
                 return
         elif self.preferred_backend == "auto":
-            # Try pulsectl first (best for PulseAudio/PipeWire on Linux)
             if self._try_init_pulsectl():
                 return
-
-            # Try sounddevice as fallback
             if self._try_init_sounddevice():
                 return
-
-            # Try pyaudio as last resort
             if self._try_init_pyaudio():
                 return
 
@@ -78,11 +76,10 @@ class AudioAnalyzer:
     def _try_init_pulsectl(self) -> bool:
         """Try to initialize PulseAudio/PipeWire via pulsectl."""
         try:
-            import pulsectl
             import os
 
-            # Try to connect to PulseAudio/PipeWire
-            # Check if we have PULSE_SERVER or XDG_RUNTIME_DIR set
+            import pulsectl
+
             pulse_server = os.environ.get("PULSE_SERVER")
             runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
 
@@ -94,16 +91,13 @@ class AudioAnalyzer:
                 pulse = pulsectl.Pulse("terminal_lyrics-probe", connect=False)
                 pulse.connect(autospawn=False)
             except Exception as e:
-                logger.debug(f"Could not connect to PulseAudio/PipeWire: {e}")
+                logger.debug("Could not connect to PulseAudio/PipeWire: %s", e)
                 return False
 
-            # Find monitor source (system audio output)
             monitor_source = None
             try:
                 sources = pulse.source_list()
 
-                # If specific device is requested, try to find it
-                
                 if self.device_name:
                     for source in sources:
                         if (
@@ -112,18 +106,20 @@ class AudioAnalyzer:
                         ):
                             monitor_source = source.name
                             logger.info(
-                                f"Found requested device: {source.description} ({source.name})"
+                                "Found requested device: %s (%s)",
+                                source.description,
+                                source.name,
                             )
                             break
 
-                # Otherwise, find any monitor source
                 if not monitor_source:
                     for source in sources:
-                        # Look for monitor sources (capture from output)
                         if ".monitor" in source.name or "monitor" in source.description.lower():
                             monitor_source = source.name
                             logger.info(
-                                f"Found monitor source: {source.description} ({source.name})"
+                                "Found monitor source: %s (%s)",
+                                source.description,
+                                source.name,
                             )
                             break
 
@@ -140,7 +136,7 @@ class AudioAnalyzer:
                 return True
 
             except Exception as e:
-                logger.debug(f"Error querying PulseAudio sources: {e}")
+                logger.debug("Error querying PulseAudio sources: %s", e)
                 pulse.close()
                 return False
 
@@ -148,7 +144,7 @@ class AudioAnalyzer:
             logger.debug("pulsectl not available")
             return False
         except Exception as e:
-            logger.debug(f"Could not initialize pulsectl: {e}")
+            logger.debug("Could not initialize pulsectl: %s", e)
             return False
 
     def _try_init_sounddevice(self) -> bool:
@@ -156,20 +152,17 @@ class AudioAnalyzer:
         try:
             import sounddevice as sd
 
-            # Check if monitor devices are available
             device_index = None
             try:
                 devices = sd.query_devices()
 
-                # If specific device is requested, try to find it
                 if self.device_name:
                     for i, dev in enumerate(devices):
                         if dev["name"] == self.device_name and dev["max_input_channels"] > 0:
                             device_index = i
-                            logger.info(f"Found requested device: {dev['name']}")
+                            logger.info("Found requested device: %s", dev["name"])
                             break
 
-                # Otherwise, look for monitor devices
                 if device_index is None:
                     for i, dev in enumerate(devices):
                         dev_name = dev["name"].lower()
@@ -178,7 +171,7 @@ class AudioAnalyzer:
                             and dev["max_input_channels"] > 0
                         ):
                             device_index = i
-                            logger.info(f"Found monitor device: {dev['name']}")
+                            logger.info("Found monitor device: %s", dev["name"])
                             break
 
                 if device_index is not None:
@@ -200,7 +193,7 @@ class AudioAnalyzer:
     def _try_init_pyaudio(self) -> bool:
         """Try to initialize pyaudio."""
         try:
-            import pyaudio
+            import pyaudio  # noqa: F401
 
             self.audio_backend = "pyaudio"
             self.audio_available = True
@@ -211,31 +204,50 @@ class AudioAnalyzer:
             logger.debug("pyaudio not available")
             return False
 
-    def start(self):
-        """Start audio capture."""
+    def start(self) -> bool:
+        """Start audio capture (requires a running asyncio event loop)."""
         if not self.audio_available:
             logger.warning("Audio capture not available")
             return False
 
-        if self.running:
+        if self._capture_task is not None and not self._capture_task.done():
             return True
 
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            logger.warning(
+                "AudioAnalyzer.start() needs a running asyncio loop "
+                "(run inside `asyncio.run()` or `terminal_lyrics watch`)."
+            )
+            return False
+
         self.running = True
-        self.thread = threading.Thread(target=self._capture_loop, daemon=True)
-        self.thread.start()
-
-        # Give it a moment to start, but don't block
-        time.sleep(0.1)
-
+        self._capture_task = loop.create_task(self._capture_runner(), name="terminal_lyrics-audio")
         return True
 
-    def stop(self):
-        """Stop audio capture."""
+    def stop(self) -> None:
+        """Stop audio capture and release devices."""
         self.running = False
-        if self.thread:
-            self.thread.join(timeout=1.0)
 
-        # Close stream based on backend
+        proc = self._parec_proc
+        if proc is not None and proc.returncode is None:
+            try:
+                proc.terminate()
+            except ProcessLookupError:
+                pass
+
+        if self._sd_stream is not None:
+            try:
+                self._sd_stream.abort()
+            except Exception:
+                logger.debug("sounddevice abort failed", exc_info=True)
+            try:
+                self._sd_stream.close()
+            except Exception as e:
+                logger.debug("sounddevice close: %s", e)
+            self._sd_stream = None
+
         if self.stream:
             try:
                 if self.audio_backend == "sounddevice":
@@ -245,173 +257,221 @@ class AudioAnalyzer:
                     self.stream.stop_stream()
                     self.stream.close()
             except Exception as e:
-                logger.error(f"Error stopping audio stream: {e}")
+                logger.error("Error stopping audio stream: %s", e)
+            self.stream = None
 
-        # Close PulseAudio connection
         if self.pulse:
             try:
                 self.pulse.close()
             except Exception as e:
-                logger.error(f"Error closing PulseAudio connection: {e}")
+                logger.error("Error closing PulseAudio connection: %s", e)
+            self.pulse = None
 
-    def _capture_loop(self):
-        """Main audio capture loop."""
-        if self.audio_backend == "pulsectl":
-            self._capture_pulsectl()
-        elif self.audio_backend == "sounddevice":
-            self._capture_sounddevice()
-        elif self.audio_backend == "pyaudio":
-            self._capture_pyaudio()
+        t = self._capture_task
+        self._capture_task = None
+        if t is not None and not t.done():
+            t.cancel()
 
-    def _capture_pulsectl(self):
-        """Capture audio using parec (PulseAudio record) from monitor source."""
+    async def _capture_runner(self) -> None:
         try:
-            import subprocess
-
-            logger.info(
-                f"Starting parec capture from PulseAudio source: {self.monitor_source_name}"
-            )
-
-            # Use parec to capture from the PulseAudio/PipeWire monitor source
-            # parec outputs raw audio to stdout
-            cmd = [
-                "parec",
-                "--device", self.monitor_source_name,
-                "--format", "float32le",
-                "--rate", str(self.sample_rate),
-                "--channels", "1",
-                "--latency-msec", "10",  # Low latency mode
-            ]
-
-            logger.info(f"Running command: {' '.join(cmd)}")
-            proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-            )
-
-            logger.info("PulseAudio/PipeWire capture started via parec")
-
-            bytes_per_sample = 4  # float32 = 4 bytes
-            # Use smaller buffer for lower latency (256 samples = ~5.8ms at 44.1kHz)
-            latency_chunk = 256
-            bytes_per_latency_chunk = latency_chunk * bytes_per_sample
-
-            # Accumulator for building full chunks for analysis
-            audio_buffer = bytearray()
-            bytes_per_analysis_chunk = self.chunk_size * bytes_per_sample
-
-            try:
-                while self.running:
-                    # Read small chunks for low latency
-                    raw_data = proc.stdout.read(bytes_per_latency_chunk)
-                    if not raw_data:
-                        if proc.poll() is not None:
-                            logger.error("parec process terminated unexpectedly")
-                            break
-                        continue
-
-                    # Add to buffer
-                    audio_buffer.extend(raw_data)
-
-                    # Process when we have enough data for analysis
-                    while len(audio_buffer) >= bytes_per_analysis_chunk:
-                        chunk = bytes(audio_buffer[:bytes_per_analysis_chunk])
-                        del audio_buffer[:bytes_per_analysis_chunk]
-
-                        # Convert raw bytes to numpy array
-                        audio_data = np.frombuffer(chunk, dtype=np.float32)
-
-                        if len(audio_data) == self.chunk_size:
-                            # Analyze frequencies
-                            self._analyze_audio(audio_data)
-
-            except Exception as e:
-                logger.error(f"Error during parec capture: {e}")
-            finally:
-                proc.terminate()
-                proc.wait(timeout=5)
-
-        except FileNotFoundError:
-            logger.error("parec not found. Install pulseaudio-utils or pipewire-alsa")
-            self.running = False
+            if self.audio_backend == "pulsectl":
+                await self._capture_pulsectl_async()
+            elif self.audio_backend == "sounddevice":
+                await self._capture_sounddevice_async()
+            elif self.audio_backend == "pyaudio":
+                await self._capture_pyaudio_async()
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
-            logger.error(f"Error in pulsectl capture: {e}")
+            logger.error("Audio capture task failed: %s", e)
+        finally:
             self.running = False
+            await self._async_finalize_capture()
 
-    def _capture_sounddevice(self):
-        """Capture audio using sounddevice."""
+    async def _async_finalize_capture(self) -> None:
+        proc = self._parec_proc
+        if proc is not None and proc.returncode is None:
+            proc.terminate()
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=2.0)
+            except (asyncio.TimeoutError, ProcessLookupError):
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass
+        self._parec_proc = None
+
+        if self._sd_stream is not None:
+            try:
+                self._sd_stream.abort()
+            except Exception:
+                pass
+            try:
+                self._sd_stream.close()
+            except Exception:
+                pass
+            self._sd_stream = None
+
+        if self.stream and self.audio_backend == "pyaudio":
+            try:
+                self.stream.stop_stream()
+                self.stream.close()
+            except Exception:
+                pass
+            self.stream = None
+
+    async def _capture_pulsectl_async(self) -> None:
+        assert self.monitor_source_name is not None
+        cmd = [
+            "parec",
+            "--device",
+            self.monitor_source_name,
+            "--format",
+            "float32le",
+            "--rate",
+            str(self.sample_rate),
+            "--channels",
+            "1",
+            "--latency-msec",
+            "10",
+        ]
+        logger.info("Running parec: %s", " ".join(cmd))
+
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        self._parec_proc = proc
+        stdout = proc.stdout
+        assert stdout is not None
+
+        bytes_per_sample = 4
+        latency_chunk = 256
+        bytes_per_latency_chunk = latency_chunk * bytes_per_sample
+        bytes_per_analysis_chunk = self.chunk_size * bytes_per_sample
+        audio_buffer = bytearray()
+
         try:
-            import sounddevice as sd
+            while self.running:
+                raw_data = await stdout.read(bytes_per_latency_chunk)
+                if not raw_data:
+                    if proc.returncode is not None:
+                        logger.error("parec process ended (code=%s)", proc.returncode)
+                        break
+                    await asyncio.sleep(0.002)
+                    continue
 
+                audio_buffer.extend(raw_data)
+                while len(audio_buffer) >= bytes_per_analysis_chunk:
+                    chunk = bytes(audio_buffer[:bytes_per_analysis_chunk])
+                    del audio_buffer[:bytes_per_analysis_chunk]
+                    audio_data = np.frombuffer(chunk, dtype=np.float32)
+                    if len(audio_data) == self.chunk_size:
+                        self._analyze_audio(audio_data)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error("Error during parec capture: %s", e)
+        finally:
+            if proc.returncode is None:
+                proc.terminate()
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=5.0)
+                except asyncio.TimeoutError:
+                    proc.kill()
+            self._parec_proc = None
+
+    async def _capture_sounddevice_async(self) -> None:
+        import sounddevice as sd
+
+        loop = asyncio.get_running_loop()
+        q: asyncio.Queue[np.ndarray] = asyncio.Queue(maxsize=8)
+
+        def make_callback():
             def callback(indata, frames, time_info, status):
                 if status:
-                    logger.debug(f"Audio status: {status}")
+                    logger.debug("Audio status: %s", status)
+                audio_data = indata[:, 0].copy() if indata.ndim > 1 else indata.copy()
 
-                # Get audio data
-                audio_data = indata[:, 0] if len(indata.shape) > 1 else indata
+                def _enqueue() -> None:
+                    if not self.running:
+                        return
+                    try:
+                        q.put_nowait(audio_data)
+                    except asyncio.QueueFull:
+                        try:
+                            q.get_nowait()
+                        except asyncio.QueueEmpty:
+                            pass
+                        try:
+                            q.put_nowait(audio_data)
+                        except asyncio.QueueFull:
+                            pass
 
-                # Analyze frequencies
-                self._analyze_audio(audio_data)
+                loop.call_soon_threadsafe(_enqueue)
 
-            # Determine which device to use
-            device_to_use = None
+            return callback
 
-            if self.device_name:
-                # Use the device that was found during init
-                try:
-                    devices = sd.query_devices()
-                    for i, dev in enumerate(devices):
-                        if dev["name"] == self.device_name and dev["max_input_channels"] > 0:
-                            device_to_use = i
-                            logger.info(f"Using configured device: {dev['name']}")
-                            break
-                except Exception as e:
-                    logger.debug(f"Could not find configured device: {e}")
-
-            # Try to open stream
+        device_to_use = None
+        if self.device_name:
             try:
-                stream_params = {
-                    "callback": callback,
-                    "channels": 1,
-                    "samplerate": self.sample_rate,
-                    "blocksize": self.chunk_size,
-                }
-
-                if device_to_use is not None:
-                    stream_params["device"] = device_to_use
-                else:
-                    logger.warning(
-                        "No specific device configured, using default input (may capture microphone instead of system audio)"
-                    )
-
-                with sd.InputStream(**stream_params):
-                    while self.running:
-                        time.sleep(0.1)
+                devices = sd.query_devices()
+                for i, dev in enumerate(devices):
+                    if dev["name"] == self.device_name and dev["max_input_channels"] > 0:
+                        device_to_use = i
+                        logger.info("Using configured device: %s", dev["name"])
+                        break
             except Exception as e:
-                logger.warning(f"Could not open audio device: {e}")
-                self.running = False
+                logger.debug("Could not find configured device: %s", e)
 
-        except Exception as e:
-            logger.error(f"Error in sounddevice capture: {e}")
-            self.running = False
+        stream_params: dict = {
+            "callback": make_callback(),
+            "channels": 1,
+            "samplerate": self.sample_rate,
+            "blocksize": self.chunk_size,
+        }
+        if device_to_use is not None:
+            stream_params["device"] = device_to_use
+        else:
+            logger.warning(
+                "No specific device configured, using default input "
+                "(may capture microphone instead of system audio)"
+            )
 
-    def _capture_pyaudio(self):
-        """Capture audio using pyaudio."""
+        stream = sd.InputStream(**stream_params)
+        self._sd_stream = stream
+        stream.start()
         try:
-            import pyaudio
+            while self.running:
+                try:
+                    audio_data = await asyncio.wait_for(q.get(), timeout=0.25)
+                except asyncio.TimeoutError:
+                    continue
+                self._analyze_audio(audio_data)
+        finally:
+            try:
+                stream.stop()
+            except Exception:
+                pass
+            try:
+                stream.close()
+            except Exception:
+                pass
+            self._sd_stream = None
 
+    async def _capture_pyaudio_async(self) -> None:
+        import pyaudio
+
+        def _open_stream():
             p = pyaudio.PyAudio()
-
-            # Try to find loopback device
             device_index = None
             for i in range(p.get_device_count()):
                 info = p.get_device_info_by_index(i)
                 if "monitor" in info["name"].lower() or "loopback" in info["name"].lower():
                     device_index = i
                     break
-
-            self.stream = p.open(
+            stream = p.open(
                 format=pyaudio.paFloat32,
                 channels=1,
                 rate=self.sample_rate,
@@ -419,114 +479,119 @@ class AudioAnalyzer:
                 input_device_index=device_index,
                 frames_per_buffer=self.chunk_size,
             )
+            return p, stream
 
+        pa = None
+        stream = None
+        try:
+            pa, stream = await asyncio.to_thread(_open_stream)
+            self.stream = stream
+
+            n = 0
             while self.running:
-                try:
-                    data = self.stream.read(self.chunk_size, exception_on_overflow=False)
-                    audio_data = np.frombuffer(data, dtype=np.float32)
-                    self._analyze_audio(audio_data)
-                except Exception as e:
-                    logger.debug(f"Error reading audio: {e}")
-                    time.sleep(0.01)
 
-            self.stream.stop_stream()
-            self.stream.close()
-            p.terminate()
+                def _read() -> bytes:
+                    assert stream is not None
+                    return stream.read(self.chunk_size, exception_on_overflow=False)
 
+                data = await asyncio.to_thread(_read)
+                audio_data = np.frombuffer(data, dtype=np.float32)
+                self._analyze_audio(audio_data)
+                n += 1
+                if n % 16 == 0:
+                    await asyncio.sleep(0)
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
-            logger.error(f"Error in pyaudio capture: {e}")
-            self.running = False
+            logger.error("Error in pyaudio capture: %s", e)
+        finally:
+            if stream is not None:
+                try:
+                    await asyncio.to_thread(stream.stop_stream)
+                    await asyncio.to_thread(stream.close)
+                except Exception:
+                    pass
+            if pa is not None:
+                try:
+                    await asyncio.to_thread(pa.terminate)
+                except Exception:
+                    pass
+            self.stream = None
 
     def _analyze_audio(self, audio_data):
         """Analyze audio data and extract frequency bands."""
         try:
             samples = np.asarray(audio_data, dtype=np.float32)
-            # Remove DC offset — otherwise FFT bin 0 looks like constant low-frequency energy.
             if samples.size >= 1:
                 samples = samples - np.mean(samples)
             if samples.size >= 4:
                 samples = samples * np.hanning(samples.size)
 
-            # Apply FFT
             fft_data = np.fft.rfft(samples)
             fft_magnitude = np.abs(fft_data)
-            # Bin 0 is DC; numerical residue can still leak a little after mean removal.
             fft_magnitude[0] = 0.0
 
-            # Power spectrum (|X|^2), then normalize to a probability mass over bins so that
-            # disjoint band sums are fractions of total energy (sum of band values ≈ 1).
             fft_power = np.asarray(fft_magnitude, dtype=np.float64) ** 2
             fft_power[0] = 0.0
             total_power = float(np.sum(fft_power))
             if total_power > 0:
                 fft_power = fft_power / total_power
 
-            fft_len = len(fft_power)  # = chunk_size + 1
+            fft_len = len(fft_power)
             sample_rate = self.sample_rate
-            nyquist = sample_rate / 2  # max representable frequency
+            nyquist = sample_rate / 2
 
-            # Frequency band boundaries
-            # Linear for bass (0-500Hz), logarithmic for rest up to nyquist
-            bass_bands = 4  # First 4 bands: linear 0-500Hz
+            bass_bands = 4
             log_bands = self.num_bands - bass_bands
-            max_freq = min(20000, nyquist)  # Cap at nyquist
+            max_freq = min(20000, nyquist)
 
             bands = []
 
             for i in range(self.num_bands):
                 if i < bass_bands:
-                    # Linear distribution for bass: 0-500Hz
                     start_hz = (i / bass_bands) * 500
                     end_hz = ((i + 1) / bass_bands) * 500
                 else:
-                    # Logarithmic distribution: 500Hz-max_freq
                     log_i = i - bass_bands
                     t_start = log_i / log_bands
                     t_end = (log_i + 1) / log_bands
                     start_hz = 500 * (max_freq / 500) ** t_start
                     end_hz = 500 * (max_freq / 500) ** t_end
 
-                # Convert Hz to FFT bin indices
                 start_bin = max(0, int(start_hz / nyquist * (fft_len - 1)))
                 end_bin = min(fft_len - 1, int(end_hz / nyquist * (fft_len - 1)))
 
                 if end_bin > start_bin:
                     band_data = fft_power[start_bin:end_bin]
-                    # Fraction of total spectral energy in this band (partition sums to ~1).
                     band_value = float(np.sum(band_data))
                     bands.append(band_value)
                 else:
                     bands.append(0.0)
 
-            # Update frequency data with lock
-            with self.lock:
+            with self._freq_lock:
                 self.frequency_data = bands
 
         except Exception as e:
-            logger.debug(f"Error analyzing audio: {e}")
+            logger.debug("Error analyzing audio: %s", e)
 
     def get_frequency_data(self) -> list[float]:
         """Per-band fraction of short-time spectral energy (sum ≈ 1 over bands)."""
-        with self.lock:
+        with self._freq_lock:
             return self.frequency_data.copy()
 
     def is_available(self) -> bool:
-        """Check if audio capture is available."""
         return self.audio_available
 
     def is_running(self) -> bool:
-        """Check if audio capture is running."""
-        return self.running
+        return self.running and self._capture_task is not None and not self._capture_task.done()
 
 
-# Singleton instance
 _audio_analyzer: Optional[AudioAnalyzer] = None
 
 
 def get_audio_analyzer(
     num_bands: int = 20, device_name: Optional[str] = None, preferred_backend: str = "auto"
 ) -> AudioAnalyzer:
-    """Get or create audio analyzer instance."""
     global _audio_analyzer
     if _audio_analyzer is None:
         _audio_analyzer = AudioAnalyzer(
