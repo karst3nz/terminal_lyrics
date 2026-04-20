@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from math import log
 from pathlib import Path
-from venv import logger
+
 import typer
 
 from terminal_lyrics.app import watch as watch_loop

@@ -290,6 +290,7 @@ class EnhancedRenderer:
         click_highlight_idx: int | None = None,
         hover_highlight_idx: int | None = None,
         status_notice: str | None = None,
+        lyrics_source_line: str | None = None,
     ) -> None:
         """Render with enhanced UI."""
         # Store args for SIGWINCH redraw
@@ -304,6 +305,7 @@ class EnhancedRenderer:
             click_highlight_idx,
             hover_highlight_idx,
             status_notice,
+            lyrics_source_line,
         )
         # Update animation state
         self.animation_state.tick()
@@ -332,6 +334,9 @@ class EnhancedRenderer:
         ):
             footer_lines += 4
         body_rows = max(rows - header_lines - footer_lines - 2, 1)  # -2 for top/bottom border
+        main_body_rows = body_rows - (1 if lyrics_source_line else 0)
+        if main_body_rows < 0:
+            main_body_rows = 0
         # Top border
         out.append(self.ansi_theme.border + draw_box_top(cols, self.border) + self.ansi_theme.reset + self.ansi_theme.border)
         # Visualizer at top
@@ -472,8 +477,8 @@ class EnhancedRenderer:
             for j, wline in enumerate(wrapped):
                 wrapped_lines.append((i, wline, j == 0))
 
-        # Calculate visible range within body_rows
-        end = min(len(wrapped_lines), body_rows)
+        # Visible wrapped rows (lyrics only; footer line is separate)
+        end = min(len(wrapped_lines), main_body_rows)
         visible = wrapped_lines[:end]
 
         for orig_idx, text, is_first in visible:
@@ -502,11 +507,26 @@ class EnhancedRenderer:
                 + self.ansi_theme.border
             )
 
-        # Fill remaining space
-        for _ in range(body_rows - len(visible)):
+        for _ in range(max(0, main_body_rows - len(visible))):
             out.append(
                 self.ansi_theme.border
                 + draw_box_line("", cols, self.border)
+                + self.ansi_theme.reset
+                + self.ansi_theme.border
+            )
+
+        if lyrics_source_line:
+            att_align = "center" if self.options.center_text else "left"
+            # past_line: theme gray (readable); dim_line is often too dark and reads as black
+            att_styled = (
+                self.ansi_theme.past_line
+                + lyrics_source_line
+                + self.ansi_theme.reset
+                + self.ansi_theme.border
+            )
+            out.append(
+                self.ansi_theme.border
+                + draw_box_line(att_styled, cols, self.border, att_align)
                 + self.ansi_theme.reset
                 + self.ansi_theme.border
             )

@@ -79,6 +79,12 @@ class AppConfig:
     enable_mouse: bool = True
     enable_media_controls: bool = True
 
+    # Local ingest HTTP server (POST lyrics, prioritized on track change)
+    ingest_enabled: bool = True
+    ingest_host: str = "127.0.0.1"
+    ingest_port: int = 7777
+    ingest_wait_timeout_s: float = 15.0
+
 
 def load_config() -> AppConfig:
     # XDG base dir fallback
@@ -102,6 +108,16 @@ def load_config() -> AppConfig:
     enable_mouse = input_cfg["enable_mouse"]
     enable_media_controls = input_cfg["enable_media_controls"]
 
+    ingest_enabled = os.getenv("TERMINAL_LYRICS_INGEST", "1") not in (
+        "0",
+        "",
+        "false",
+        "False",
+    )
+    ingest_host = os.getenv("TERMINAL_LYRICS_INGEST_HOST", "127.0.0.1").strip() or "127.0.0.1"
+    ingest_port = int(os.getenv("TERMINAL_LYRICS_INGEST_PORT", "7777"))
+    ingest_wait_timeout_s = float(os.getenv("TERMINAL_LYRICS_INGEST_WAIT_S", "15"))
+
     return AppConfig(
         data_dir=data_dir,
         cache_db_path=data_dir / "cache.sqlite3",
@@ -119,6 +135,10 @@ def load_config() -> AppConfig:
         enable_media_controls=enable_media_controls,
         visual=visual,
         audio=audio,
+        ingest_enabled=ingest_enabled,
+        ingest_host=ingest_host,
+        ingest_port=ingest_port,
+        ingest_wait_timeout_s=ingest_wait_timeout_s,
     )
 
 

@@ -47,19 +47,20 @@ class LyricsCache:
                 "CREATE INDEX IF NOT EXISTS idx_lyrics_cache_updated_at ON lyrics_cache(updated_at);"
             )
 
-    def get(self, key: CacheKey) -> tuple[str | None, bool | None]:
+    def get(self, key: CacheKey) -> tuple[str | None, bool | None, str | None]:
         """
-        Returns (lrc_text, has_lyrics) or (None, None) if no entry.
+        Returns (lrc_text, has_lyrics, source) or (None, None, None) if no entry.
         """
         with self._connect() as con:
             row = con.execute(
-                "SELECT has_lyrics, lrc_text FROM lyrics_cache WHERE artist=? AND title=? AND album=?",
+                "SELECT has_lyrics, lrc_text, source FROM lyrics_cache WHERE artist=? AND title=? AND album=?",
                 (key.artist, key.title, key.album),
             ).fetchone()
             if row is None:
-                return None, None
+                return None, None, None
             has = bool(row["has_lyrics"])
-            return (row["lrc_text"] if has else None), has
+            src = row["source"]
+            return (row["lrc_text"] if has else None), has, src
 
     def set(self, key: CacheKey, *, has_lyrics: bool, lrc_text: str | None, source: str | None) -> None:
         now = int(time.time())

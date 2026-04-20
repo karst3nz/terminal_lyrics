@@ -19,6 +19,7 @@ from terminal_lyrics.render.ansi import (
     media_controls_layout,
 )
 from terminal_lyrics.render.layout import ICON_PAUSED, ICON_PLAYING, _display_width, format_time, wrap_text
+from terminal_lyrics.sources.attribution import format_lyrics_source_footer
 from terminal_lyrics.sources.service import LyricsService
 from terminal_lyrics.sources.types import TrackKey
 from terminal_lyrics.sync.tracker import LineTracker
@@ -62,7 +63,12 @@ def _clamp_scroll_offset(
 
 
 def _compute_layout_info(
-    cols: int, rows: int, options: RenderOptions, *, has_progress_line: bool
+    cols: int,
+    rows: int,
+    options: RenderOptions,
+    *,
+    has_progress_line: bool,
+    lyrics_footer_lines: int = 0,
 ) -> dict[str, int | None]:
     """Compute key layout rows to map mouse clicks to UI zones."""
     header_lines = 1
@@ -104,8 +110,9 @@ def _compute_layout_info(
         bottom_visualizer_start = rows - 4
         bottom_visualizer_end = rows - 2
     body_rows = max(rows - header_lines - footer_lines - 2, 1)
+    lyric_body_rows = max(0, body_rows - lyrics_footer_lines)
     lyrics_row_start = top_offset + (metadata_block_lines if options.show_metadata else 0)
-    lyrics_row_end = lyrics_row_start + body_rows - 1
+    lyrics_row_end = lyrics_row_start + lyric_body_rows - 1 if lyric_body_rows > 0 else lyrics_row_start - 1
 
     return {
         "title_row": title_row,
@@ -117,7 +124,7 @@ def _compute_layout_info(
         "bottom_visualizer_end": bottom_visualizer_end,
         "lyrics_row_start": lyrics_row_start,
         "lyrics_row_end": lyrics_row_end,
-        "body_rows": body_rows,
+        "body_rows": lyric_body_rows,
     }
 
 
@@ -140,6 +147,8 @@ def _visible_lyrics_mapping(
     body_rows: int,
 ) -> list[int]:
     """Map visible wrapped rows to original lyric line indices."""
+    if body_rows <= 0:
+        return []
     if current_idx < 0:
         base_start = 0
     else:
@@ -190,9 +199,40 @@ def watch(cfg: AppConfig, *, preferred_player: str | None, debug: bool) -> int:
     """
     Main watch loop:
     MPRIS -> (track, position) -> lyrics -> parse -> bisect -> render on change.
+
+    Lyrics ingest (optional): when enabled, the HTTP server is started in a
+    daemon thread and runs concurrently with this loop on the main thread—same
+    process, no separate command required.
     """
     set_lang(cfg.lang)
-    svc = LyricsService(cfg)
+
+    ingest_httpd = None
+    ingest_store = None
+    if cfg.ingest_enabled:
+        from terminal_lyrics.sources.local_ingest import start_ingest_server
+
+        try:
+            # Background thread: serve_forever; main thread continues to UI loop below.
+            ingest_store, _ingest_thr, ingest_httpd = start_ingest_server(
+                cfg.ingest_host, cfg.ingest_port
+            )
+        except OSError as exc:
+            logger.warning(
+                "Lyrics ingest server not started (%s:%s): %s. "
+                "If the address is already in use, stop the other process or set "
+                "TERMINAL_LYRICS_INGEST_PORT to a free port.",
+                cfg.ingest_host,
+                cfg.ingest_port,
+                exc,
+            )
+            ingest_store = None
+            ingest_httpd = None
+    elif debug:
+        logger.debug(
+            "Lyrics ingest HTTP server is off (TERMINAL_LYRICS_INGEST=0). It is enabled by default."
+        )
+
+    svc = LyricsService(cfg, local_ingest_store=ingest_store)
 
     # Create render options from config
     render_options = RenderOptions(
@@ -269,6 +309,7 @@ def watch(cfg: AppConfig, *, preferred_player: str | None, debug: bool) -> int:
         status_notice: str | None = None
         status_notice_until: float | None = None
         active_player_name: str | None = None
+        lyrics_source_line: str | None = None
 
         tick_s = 1.0 / max(cfg.refresh_hz, 1.0)
 
@@ -333,6 +374,7 @@ def watch(cfg: AppConfig, *, preferred_player: str | None, debug: bool) -> int:
                 hover_highlight_since = None
                 status_notice = None
                 status_notice_until = None
+                lyrics_source_line = None
 
                 track = TrackKey(artist=ti.artist, title=ti.title, album=ti.album)
                 res = svc.get_lyrics(track)
@@ -341,6 +383,7 @@ def watch(cfg: AppConfig, *, preferred_player: str | None, debug: bool) -> int:
                     tracker = None
                     timed_lines = [t("lyrics_not_found")]
                 else:
+                    lyrics_source_line = format_lyrics_source_footer(res.source)
                     doc = parse_lrc(res.lrc_text)
                     if doc.events:
                         tracker = LineTracker.from_events(doc.events)
@@ -384,6 +427,7 @@ def watch(cfg: AppConfig, *, preferred_player: str | None, debug: bool) -> int:
                     click_highlight_idx=click_highlight_idx,
                     hover_highlight_idx=hover_highlight_idx,
                     status_notice=status_notice,
+                    lyrics_source_line=lyrics_source_line,
                 )
             else:
                 # No synced lyrics or no lyrics at all - still render for progress bar
@@ -398,6 +442,7 @@ def watch(cfg: AppConfig, *, preferred_player: str | None, debug: bool) -> int:
                     click_highlight_idx=click_highlight_idx,
                     hover_highlight_idx=hover_highlight_idx,
                     status_notice=status_notice,
+                    lyrics_source_line=lyrics_source_line,
                 )
 
             # Check for mouse actions after rendering
@@ -410,6 +455,7 @@ def watch(cfg: AppConfig, *, preferred_player: str | None, debug: bool) -> int:
                     has_progress_line=bool(
                         render_options.show_progress_bar and ti.length_ms > 0
                     ),
+                    lyrics_footer_lines=1 if lyrics_source_line else 0,
                 )
                 # Drain queued events each tick so press/release pairs don't "stall" controls.
                 for _ in range(20):
@@ -601,6 +647,11 @@ def watch(cfg: AppConfig, *, preferred_player: str | None, debug: bool) -> int:
 
             time.sleep(tick_s)
     finally:
+        if ingest_httpd is not None:
+            try:
+                ingest_httpd.shutdown()
+            except Exception:
+                logger.exception("Failed to shut down lyrics ingest server")
         if mouse_handler:
             mouse_handler.exit()
         renderer.exit()
