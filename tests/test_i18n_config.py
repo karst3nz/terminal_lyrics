@@ -45,8 +45,8 @@ class TestConfigLang:
         assert cfg.lang == "EN"
 
     def test_load_lang_priority_config_over_env(self, tmp_path, monkeypatch):
-        (tmp_path / "terminal-lyrics").mkdir(parents=True, exist_ok=True)
-        (tmp_path / "terminal-lyrics" / "config.json").write_text(
+        (tmp_path / "terminal_lyrics").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "terminal_lyrics" / "config.json").write_text(
             '{"lang": "RU"}', encoding="utf-8"
         )
         monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))

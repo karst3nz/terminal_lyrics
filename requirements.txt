@@ -1,7 +1,9 @@
 colorama
 regex
 dbus-python
-requests
+httpx
+aiosqlite
+aiohttp
 soundfile
 sounddevice
 numpy

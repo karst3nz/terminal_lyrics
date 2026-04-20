@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import asyncio
 import logging
 import math
 import shutil
@@ -10,7 +11,7 @@ import time
 from terminal_lyrics.config import AppConfig, save_visual_config
 from terminal_lyrics.i18n import set_lang, t
 from terminal_lyrics.lrc.parse import parse_lrc
-from terminal_lyrics.mpris.client import MprisClient
+from terminal_lyrics.mpris import async_dbus as mpris_async
 from terminal_lyrics.mpris.errors import NoPlayersFound, PlayerUnavailable
 from terminal_lyrics.render.ansi import (
     AnsiRenderer,
@@ -19,6 +20,7 @@ from terminal_lyrics.render.ansi import (
     media_controls_layout,
 )
 from terminal_lyrics.render.layout import ICON_PAUSED, ICON_PLAYING, _display_width, format_time, wrap_text
+from terminal_lyrics.sources.attribution import format_lyrics_source_footer
 from terminal_lyrics.sources.service import LyricsService
 from terminal_lyrics.sources.types import TrackKey
 from terminal_lyrics.sync.tracker import LineTracker
@@ -27,18 +29,18 @@ logger = logging.getLogger(__name__)
 VISUALIZER_STYLES: tuple[str, ...] = ("equalizer", "waveform", "blocks", "dots", "centered")
 
 
-def _handle_mouse_action(action: str, client: "MprisClient") -> None:
-    """Execute a mouse click action on the MPRIS client."""
+async def _handle_mouse_action(action: str, player_service: str) -> None:
+    """Execute a mouse click action on the MPRIS player (D-Bus via background thread)."""
     try:
         if action == "prev":
             logger.debug("Mouse action: previous_track")
-            client.previous_track()
+            await mpris_async.previous_track(player_service)
         elif action == "play_pause":
             logger.debug("Mouse action: play_pause")
-            client.play_pause()
+            await mpris_async.play_pause(player_service)
         elif action == "next":
             logger.debug("Mouse action: next_track")
-            client.next_track()
+            await mpris_async.next_track(player_service)
     except Exception as e:
         logger.exception("Failed to execute mouse action '%s': %s", action, e)
 
@@ -62,7 +64,12 @@ def _clamp_scroll_offset(
 
 
 def _compute_layout_info(
-    cols: int, rows: int, options: RenderOptions, *, has_progress_line: bool
+    cols: int,
+    rows: int,
+    options: RenderOptions,
+    *,
+    has_progress_line: bool,
+    lyrics_footer_lines: int = 0,
 ) -> dict[str, int | None]:
     """Compute key layout rows to map mouse clicks to UI zones."""
     header_lines = 1
@@ -104,8 +111,9 @@ def _compute_layout_info(
         bottom_visualizer_start = rows - 4
         bottom_visualizer_end = rows - 2
     body_rows = max(rows - header_lines - footer_lines - 2, 1)
+    lyric_body_rows = max(0, body_rows - lyrics_footer_lines)
     lyrics_row_start = top_offset + (metadata_block_lines if options.show_metadata else 0)
-    lyrics_row_end = lyrics_row_start + body_rows - 1
+    lyrics_row_end = lyrics_row_start + lyric_body_rows - 1 if lyric_body_rows > 0 else lyrics_row_start - 1
 
     return {
         "title_row": title_row,
@@ -117,7 +125,7 @@ def _compute_layout_info(
         "bottom_visualizer_end": bottom_visualizer_end,
         "lyrics_row_start": lyrics_row_start,
         "lyrics_row_end": lyrics_row_end,
-        "body_rows": body_rows,
+        "body_rows": lyric_body_rows,
     }
 
 
@@ -140,6 +148,8 @@ def _visible_lyrics_mapping(
     body_rows: int,
 ) -> list[int]:
     """Map visible wrapped rows to original lyric line indices."""
+    if body_rows <= 0:
+        return []
     if current_idx < 0:
         base_start = 0
     else:
@@ -186,13 +196,44 @@ def _progress_bar_click_bounds(
     return bar_start_x, bar_end_x
 
 
-def watch(cfg: AppConfig, *, preferred_player: str | None, debug: bool) -> int:
+async def watch(cfg: AppConfig, *, preferred_player: str | None, debug: bool) -> int:
     """
     Main watch loop:
     MPRIS -> (track, position) -> lyrics -> parse -> bisect -> render on change.
+
+    Lyrics ingest (optional): when enabled, an aiohttp server runs on the same
+    asyncio event loop as this UI loop.
     """
     set_lang(cfg.lang)
-    svc = LyricsService(cfg)
+
+    ingest_runner = None
+    ingest_site = None
+    ingest_store = None
+    if cfg.ingest_enabled:
+        from terminal_lyrics.sources.local_ingest import start_ingest_server_async
+
+        try:
+            ingest_store, ingest_runner, ingest_site = await start_ingest_server_async(
+                cfg.ingest_host, cfg.ingest_port
+            )
+        except OSError as exc:
+            logger.warning(
+                "Lyrics ingest server not started (%s:%s): %s. "
+                "If the address is already in use, stop the other process or set "
+                "TERMINAL_LYRICS_INGEST_PORT to a free port.",
+                cfg.ingest_host,
+                cfg.ingest_port,
+                exc,
+            )
+            ingest_store = None
+            ingest_runner = None
+            ingest_site = None
+    elif debug:
+        logger.debug(
+            "Lyrics ingest HTTP server is off (TERMINAL_LYRICS_INGEST=0). It is enabled by default."
+        )
+
+    svc = LyricsService(cfg, local_ingest_store=ingest_store)
 
     # Create render options from config
     render_options = RenderOptions(
@@ -269,45 +310,48 @@ def watch(cfg: AppConfig, *, preferred_player: str | None, debug: bool) -> int:
         status_notice: str | None = None
         status_notice_until: float | None = None
         active_player_name: str | None = None
+        lyrics_source_line: str | None = None
 
         tick_s = 1.0 / max(cfg.refresh_hz, 1.0)
 
         while True:
             try:
                 if active_player_name:
-                    client = MprisClient(active_player_name)
+                    await mpris_async.probe_player(active_player_name)
                 else:
-                    client = MprisClient.pick_player(preferred=preferred_player)
-                    active_player_name = client.service_name
+                    active_player_name = await mpris_async.pick_player_service_name(
+                        preferred_player
+                    )
             except Exception:
                 # Active player disappeared or became invalid: repick.
                 active_player_name = None
                 try:
-                    client = MprisClient.pick_player(preferred=preferred_player)
-                    active_player_name = client.service_name
+                    active_player_name = await mpris_async.pick_player_service_name(
+                        preferred_player
+                    )
                 except NoPlayersFound:
                     renderer.render("terminal_lyrics", [t("no_mpris_players")], current_idx=-1)
-                    time.sleep(1.0)
+                    await asyncio.sleep(1.0)
                     continue
             try:
-                ti = client.track_info()
+                ti = await mpris_async.track_info(active_player_name)
             except PlayerUnavailable as e:
                 renderer.render(
                     "terminal_lyrics", [t("mpris_unavailable", msg=str(e))], current_idx=-1
                 )
-                time.sleep(0.5)
+                await asyncio.sleep(0.5)
                 continue
 
             if not ti.title or not ti.artist:
                 renderer.render("terminal_lyrics", [t("no_artist_title")], current_idx=-1)
-                time.sleep(0.5)
+                await asyncio.sleep(0.5)
                 continue
 
             # Update playback state for progress bar
             try:
-                pos_ms = client.position_ms()
+                pos_ms = await mpris_async.position_ms(active_player_name)
                 duration_ms = ti.length_ms
-                status = client.playback_status()
+                status = await mpris_async.playback_status(active_player_name)
                 is_playing = status.lower() == "playing"
 
                 renderer.update_playback_state(
@@ -333,14 +377,16 @@ def watch(cfg: AppConfig, *, preferred_player: str | None, debug: bool) -> int:
                 hover_highlight_since = None
                 status_notice = None
                 status_notice_until = None
+                lyrics_source_line = None
 
                 track = TrackKey(artist=ti.artist, title=ti.title, album=ti.album)
-                res = svc.get_lyrics(track)
+                res = await svc.get_lyrics(track)
                 if not res.has_lyrics or not res.lrc_text:
                     # No lyrics found - set empty tracker to continue rendering
                     tracker = None
                     timed_lines = [t("lyrics_not_found")]
                 else:
+                    lyrics_source_line = format_lyrics_source_footer(res.source)
                     doc = parse_lrc(res.lrc_text)
                     if doc.events:
                         tracker = LineTracker.from_events(doc.events)
@@ -365,10 +411,10 @@ def watch(cfg: AppConfig, *, preferred_player: str | None, debug: bool) -> int:
             if tracker is not None:
                 # Synced lyrics mode
                 try:
-                    pos_ms = client.position_ms()
+                    pos_ms = await mpris_async.position_ms(active_player_name)
                 except PlayerUnavailable:
                     # if player briefly unavailable, don't crash; keep last frame
-                    time.sleep(tick_s)
+                    await asyncio.sleep(tick_s)
                     continue
 
                 current_idx = tracker.current_index(pos_ms)
@@ -384,6 +430,7 @@ def watch(cfg: AppConfig, *, preferred_player: str | None, debug: bool) -> int:
                     click_highlight_idx=click_highlight_idx,
                     hover_highlight_idx=hover_highlight_idx,
                     status_notice=status_notice,
+                    lyrics_source_line=lyrics_source_line,
                 )
             else:
                 # No synced lyrics or no lyrics at all - still render for progress bar
@@ -398,6 +445,7 @@ def watch(cfg: AppConfig, *, preferred_player: str | None, debug: bool) -> int:
                     click_highlight_idx=click_highlight_idx,
                     hover_highlight_idx=hover_highlight_idx,
                     status_notice=status_notice,
+                    lyrics_source_line=lyrics_source_line,
                 )
 
             # Check for mouse actions after rendering
@@ -410,6 +458,7 @@ def watch(cfg: AppConfig, *, preferred_player: str | None, debug: bool) -> int:
                     has_progress_line=bool(
                         render_options.show_progress_bar and ti.length_ms > 0
                     ),
+                    lyrics_footer_lines=1 if lyrics_source_line else 0,
                 )
                 # Drain queued events each tick so press/release pairs don't "stall" controls.
                 for _ in range(20):
@@ -491,7 +540,7 @@ def watch(cfg: AppConfig, *, preferred_player: str | None, debug: bool) -> int:
                                 ratio = (clamped_x - bar_left) / max(1, bar_right - bar_left)
                                 target_ms = int(ti.length_ms * ratio)
                                 try:
-                                    client.seek_ms(target_ms)
+                                    await mpris_async.seek_ms(active_player_name, target_ms)
                                 except Exception:
                                     logger.exception("Failed to seek from progress bar click")
                         else:
@@ -512,7 +561,9 @@ def watch(cfg: AppConfig, *, preferred_player: str | None, debug: bool) -> int:
                                     for btn_idx, width in enumerate(btn_widths):
                                         boundary += width
                                         if rel_x < boundary:
-                                            _handle_mouse_action(actions[btn_idx], client)
+                                            await _handle_mouse_action(
+                                                actions[btn_idx], active_player_name
+                                            )
                                             break
 
                             # Click on visualizer area: cycle style and persist config.
@@ -568,7 +619,9 @@ def watch(cfg: AppConfig, *, preferred_player: str | None, debug: bool) -> int:
                                     if 0 <= target_line_idx < len(timed_line_times_ms):
                                         target_ms = timed_line_times_ms[target_line_idx]
                                         try:
-                                            client.seek_ms(target_ms)
+                                            await mpris_async.seek_ms(
+                                                active_player_name, target_ms
+                                            )
                                             lyrics_scroll_offset = 0
                                             last_scroll_action_at = None
                                             click_highlight_idx = target_line_idx
@@ -599,8 +652,19 @@ def watch(cfg: AppConfig, *, preferred_player: str | None, debug: bool) -> int:
                 if lyrics_scroll_offset == 0:
                     last_scroll_action_at = None
 
-            time.sleep(tick_s)
+            await asyncio.sleep(tick_s)
     finally:
+        if ingest_site is not None:
+            try:
+                await ingest_site.stop()
+            except Exception:
+                logger.exception("Failed to stop lyrics ingest site")
+        if ingest_runner is not None:
+            try:
+                await ingest_runner.cleanup()
+            except Exception:
+                logger.exception("Failed to clean up lyrics ingest runner")
+        mpris_async.shutdown_mpris_executor()
         if mouse_handler:
             mouse_handler.exit()
         renderer.exit()

@@ -16,7 +16,9 @@ setup(
         "colorama",
         "regex",
         "dbus-python",
-        "requests",
+        "httpx",
+        "aiosqlite",
+        "aiohttp",
         "typer",
     ],
     extras_require={

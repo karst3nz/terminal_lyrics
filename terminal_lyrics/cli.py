@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from math import log
+import asyncio
 from pathlib import Path
-from venv import logger
+
 import typer
 
 from terminal_lyrics.app import watch as watch_loop
@@ -21,7 +21,7 @@ from terminal_lyrics.i18n import set_lang, t
 from terminal_lyrics.logging_setup import setup_logging
 from terminal_lyrics.lrc.export import export_json, export_lrc, export_srt
 from terminal_lyrics.lrc.parse import parse_lrc_with_stats
-from terminal_lyrics.mpris.client import MprisClient
+from terminal_lyrics.mpris import async_dbus as mpris_async
 from terminal_lyrics.sources.service import LyricsService
 from terminal_lyrics.render.themes import ThemeManager
 from terminal_lyrics.tui_config import run_setup_tui
@@ -78,14 +78,16 @@ def watch(
         cfg = cfg.__class__(**{**cfg.__dict__, "use_alt_screen": False})
     setup_logging(debug, log_to_file=log_file)
     raise typer.Exit(
-        code=watch_loop(cfg, preferred_player=player or cfg.preferred_player, debug=debug)
+        code=asyncio.run(
+            watch_loop(cfg, preferred_player=player or cfg.preferred_player, debug=debug)
+        )
     )
 
 
 @app.command()
 def players():
     """List available MPRIS players."""
-    for p in MprisClient.list_players():
+    for p in asyncio.run(mpris_async.list_players()):
         typer.echo(p)
 
 
@@ -138,7 +140,11 @@ def cache(
     set_lang(cfg.lang)
     cache_db = LyricsCache(cfg.cache_db_path)
     if clear:
-        cache_db.clear()
+
+        async def _do_clear() -> None:
+            await cache_db.clear()
+
+        asyncio.run(_do_clear())
         typer.echo(t("cache_cleared", path=str(cfg.cache_db_path)))
     else:
         typer.echo(t("use_clear_to_clear"))
@@ -164,8 +170,11 @@ def search(
         typer.echo(t("search_query_required"), err=True)
         raise typer.Exit(code=1)
 
-    service = LyricsService(cfg)
-    results = service.search(q=q, track_name=track, artist_name=artist, album_name=album)
+    async def _search():
+        service = LyricsService(cfg)
+        return await service.search(q=q, track_name=track, artist_name=artist, album_name=album)
+
+    results = asyncio.run(_search())
 
     if not results:
         typer.echo(t("no_results_found"))

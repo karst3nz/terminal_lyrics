@@ -77,5 +77,11 @@
   "wizard_preview_lyric_2": "А теперь похоже, что они здесь навсегда",
   "wizard_preview_lyric_3": "О, я верю во вчерашний день",
   "wizard_cancelled": "Отменено. Изменения не сохранены.",
-  "wizard_saved": "Сохранено. Запустите `terminal_lyrics watch`, чтобы применить изменения."
+  "wizard_saved": "Сохранено. Запустите `terminal_lyrics watch`, чтобы применить изменения.",
+  "lyrics_source_footer": "Источник: {sources}",
+  "source_lrclib": "LRCLIB",
+  "source_lrclib_search": "LRCLIB",
+  "source_lyrics_ovh": "lyrics.ovh",
+  "source_local_ingest": "Яндекс",
+  "source_cache": "кэш"
 }

@@ -77,5 +77,11 @@
   "wizard_preview_lyric_2": "Now it looks as though they're here to stay",
   "wizard_preview_lyric_3": "Oh, I believe in yesterday",
   "wizard_cancelled": "Cancelled. No changes saved.",
-  "wizard_saved": "Saved. Run `terminal_lyrics watch` to apply changes."
+  "wizard_saved": "Saved. Run `terminal_lyrics watch` to apply changes.",
+  "lyrics_source_footer": "Source: {sources}",
+  "source_lrclib": "LRCLIB",
+  "source_lrclib_search": "LRCLIB",
+  "source_lyrics_ovh": "lyrics.ovh",
+  "source_local_ingest": "Yandex",
+  "source_cache": "cache"
 }
