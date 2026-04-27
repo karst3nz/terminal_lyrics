@@ -5,6 +5,7 @@ import json
 import logging
 import time
 from urllib.parse import parse_qs, urlparse
+from typing import Set
 
 from aiohttp import web
 
@@ -54,13 +55,15 @@ def _cache_key_from_params(
 class LocalLyricsStore:
     """In-memory lyrics keyed like the SQLite cache; wait/notify for ingest priority."""
 
-    def __init__(self) -> None:
+    def __init__(self, lyrics_callback: callable = None) -> None:
         self._cond = asyncio.Condition()
         self._lyrics: dict[tuple[str, str, str], str] = {}
         self._unbound_posted_seq = 0
         self._unbound_consumed_seq = 0
         self._unbound_pending: str | None = None
         self._unbound_posted_at = 0.0
+        self._ws_connections: Set[web.WebSocketResponse] = set()
+        self._lyrics_callback = lyrics_callback
 
     @staticmethod
     def key_tuple(key: CacheKey) -> tuple[str, str, str]:
@@ -71,6 +74,17 @@ class LocalLyricsStore:
             self._lyrics[self.key_tuple(key)] = text
             self._cond.notify_all()
         logger.debug("Local ingest: stored lyrics for %s - %s", key.artist, key.title)
+        if self._lyrics_callback:
+            self._lyrics_callback(key, text)
+        await self._notify_ws_clients(
+            {
+                "type": "lyrics_added",
+                "artist": key.artist,
+                "title": key.title,
+                "album": key.album,
+                "lyrics_length": len(text),
+            }
+        )
 
     async def set_unbound_lyrics(self, text: str) -> None:
         """Lyrics without artist/title — matched to whoever is waiting (e.g. browser extension)."""
@@ -80,6 +94,7 @@ class LocalLyricsStore:
             self._unbound_posted_at = time.monotonic()
             self._cond.notify_all()
         logger.debug("Local ingest: unbound lyrics chunk (%s chars)", len(text))
+        await self._notify_ws_clients({"type": "unbound_lyrics_added", "lyrics_length": len(text)})
 
     async def get_lyrics(self, key: CacheKey) -> str | None:
         async with self._cond:
@@ -119,6 +134,28 @@ class LocalLyricsStore:
                 except asyncio.TimeoutError:
                     continue
 
+    def add_ws_connection(self, ws: web.WebSocketResponse) -> None:
+        """Add a WebSocket connection to the set of active connections."""
+        self._ws_connections.add(ws)
+
+    def remove_ws_connection(self, ws: web.WebSocketResponse) -> None:
+        """Remove a WebSocket connection from the set of active connections."""
+        self._ws_connections.discard(ws)
+
+    async def _notify_ws_clients(self, message: dict) -> None:
+        """Send a message to all connected WebSocket clients."""
+        if not self._ws_connections:
+            return
+
+        # Create a copy of the connections set to avoid issues if connections are removed during iteration
+        connections = self._ws_connections.copy()
+        for ws in connections:
+            try:
+                await ws.send_json(message)
+            except Exception:
+                # Connection might be closed, remove it
+                self._ws_connections.discard(ws)
+
 
 _STORE_KEY = web.AppKey("terminal_lyrics_ingest_store", LocalLyricsStore)
 
@@ -146,6 +183,130 @@ async def _handle_head_health(request: web.Request) -> web.Response:
         status=200,
         headers={**dict(_CORS_BASE), "Content-Type": "application/json; charset=utf-8"},
     )
+
+
+async def _handle_ws_message(
+    ws: web.WebSocketResponse, store: LocalLyricsStore, data: dict, remote: str
+) -> None:
+    """Handle incoming WebSocket messages."""
+    msg_type = data.get("type")
+
+    if msg_type == "send_lyrics":
+        # Handle lyrics submission via WebSocket
+        artist = data.get("artist")
+        title = data.get("title")
+        album = data.get("album")
+        lrc_text = data.get("lyrics") or data.get("lrc_text") or data.get("text")
+        download_url = data.get("downloadUrl")
+
+        if not lrc_text or not lrc_text.strip():
+            # If no lyrics text but downloadUrl provided, try fetching
+            if download_url:
+                try:
+                    import aiohttp
+
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(download_url) as resp:
+                            if resp.status == 200:
+                                fetched_text = await resp.text()
+                                if fetched_text.strip():
+                                    lrc_text = fetched_text.strip()
+                                    logger.debug(
+                                        "Fetched lyrics from downloadUrl for %s - %s",
+                                        artist or "unknown",
+                                        title or "unknown",
+                                    )
+                                else:
+                                    await ws.send_json({"error": "empty lyrics from downloadUrl"})
+                                    return
+                            else:
+                                await ws.send_json(
+                                    {"error": f"failed to fetch from downloadUrl: {resp.status}"}
+                                )
+                                return
+                except Exception as e:
+                    logger.exception("Error fetching from downloadUrl")
+                    await ws.send_json({"error": "failed to fetch lyrics"})
+                    return
+            else:
+                await ws.send_json({"error": "lyrics text required"})
+                return
+
+        if artist and title:
+            # Regular lyrics with artist/title
+            key = _cache_key_from_params(
+                str(artist).strip(), str(title).strip(), str(album or "").strip()
+            )
+            if key:
+                await store.set_lyrics(key, lrc_text.strip())
+                logger.debug(
+                    "WebSocket lyrics received from %s: accepted lyrics for %s - %s (%d chars)",
+                    remote,
+                    key.artist,
+                    key.title,
+                    len(lrc_text),
+                )
+                await ws.send_json(
+                    {
+                        "ok": True,
+                        "type": "lyrics_accepted",
+                        "artist": key.artist,
+                        "title": key.title,
+                    }
+                )
+            else:
+                await ws.send_json({"error": "invalid artist/title"})
+        else:
+            # Unbound lyrics
+            await store.set_unbound_lyrics(lrc_text.strip())
+            logger.debug(
+                "WebSocket lyrics received from %s: accepted unbound lyrics (%d chars)",
+                remote,
+                len(lrc_text),
+            )
+            await ws.send_json({"ok": True, "type": "unbound_lyrics_accepted"})
+
+    elif msg_type == "ping":
+        # Simple ping-pong for connection testing
+        await ws.send_json({"type": "pong"})
+
+    else:
+        await ws.send_json({"error": f"unknown message type: {msg_type}"})
+
+
+async def _handle_websocket(request: web.Request) -> web.WebSocketResponse:
+    """Handle WebSocket connections for real-time lyrics updates."""
+    store: LocalLyricsStore = request.app[_STORE_KEY]
+
+    ws = web.WebSocketResponse(heartbeat=30.0)  # Send heartbeat every 30 seconds
+    await ws.prepare(request)
+
+    store.add_ws_connection(ws)
+    logger.debug("WebSocket connection established from %s", request.remote)
+
+    try:
+        async for msg in ws:
+            if msg.type == web.WSMsgType.ERROR:
+                logger.error("WebSocket error from %s: %s", request.remote, ws.exception())
+            elif msg.type == web.WSMsgType.TEXT:
+                try:
+                    data = json.loads(msg.data)
+                    await _handle_ws_message(ws, store, data, request.remote)
+                except json.JSONDecodeError:
+                    logger.warning("Invalid JSON received from %s: %s", request.remote, msg.data)
+                    await ws.send_json({"error": "Invalid JSON"})
+                except Exception as e:
+                    logger.error(
+                        "Error processing WebSocket message from %s: %s", request.remote, e
+                    )
+                    await ws.send_json({"error": "Internal server error"})
+            elif msg.type == web.WSMsgType.CLOSE:
+                break
+    finally:
+        store.remove_ws_connection(ws)
+        logger.debug("WebSocket connection closed from %s", request.remote)
+
+    return ws
 
 
 async def _handle_post(request: web.Request) -> web.Response:
@@ -219,13 +380,11 @@ async def _handle_post(request: web.Request) -> web.Response:
             request.remote,
             request.rel_url,
         )
-        return _json_error(
-            400, "lyrics text required (JSON lyrics / lrc_text / text or body)"
-        )
+        return _json_error(400, "lyrics text required (JSON lyrics / lrc_text / text or body)")
 
     if key is not None:
         await store.set_lyrics(key, lrc_text)
-        logger.info(
+        logger.debug(
             "ingest %s: accepted lyrics for %s - %s (%d chars, %s)",
             request.remote,
             key.artist,
@@ -246,7 +405,7 @@ async def _handle_post(request: web.Request) -> web.Response:
                 "artist and title required for non-JSON POST (use query or JSON fields)",
             )
         await store.set_unbound_lyrics(lrc_text)
-        logger.info(
+        logger.debug(
             "ingest %s: accepted unbound lyrics (%d chars)",
             request.remote,
             len(lrc_text),
@@ -274,12 +433,17 @@ async def start_ingest_server_async(
     app.router.add_head("/health", _handle_head_health)
     app.router.add_post("/", _handle_post)
     app.router.add_post("/lyrics", _handle_post)
+    app.router.add_get("/ws", _handle_websocket)
 
     runner = web.AppRunner(app, access_log=None)
     await runner.setup()
     site = web.TCPSite(runner, host=host, port=port, reuse_address=True)
     await site.start()
 
-    bound = site._server.sockets[0].getsockname() if site._server and site._server.sockets else (host, port)
-    logger.info("Local lyrics ingest server listening on http://%s:%s", bound[0], bound[1])
+    bound = (
+        site._server.sockets[0].getsockname()
+        if site._server and site._server.sockets
+        else (host, port)
+    )
+    logger.debug("Local lyrics ingest server listening on http://%s:%s", bound[0], bound[1])
     return store, runner, site

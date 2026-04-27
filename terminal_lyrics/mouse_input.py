@@ -144,10 +144,10 @@ class MouseControlsHandler:
         btn_name = button_names.get(button, f"unknown({button})")
         event_type = "release" if is_release else ("wheel" if is_wheel else ("motion" if is_motion else "press"))
 
-        logger.debug(
-            "Mouse event [SGR]: button=%s(%d) x=%d y=%d event=%s raw_btn=%d suffix=%s",
-            btn_name, button, x - 1, y - 1, event_type, btn, suffix,
-        )
+        # logger.debug(
+        #     "Mouse event [SGR]: button=%s(%d) x=%d y=%d event=%s raw_btn=%d suffix=%s",
+        #     btn_name, button, x - 1, y - 1, event_type, btn, suffix,
+        # )
 
         return {
             "button": button,
@@ -192,10 +192,10 @@ class MouseControlsHandler:
         btn_name = button_names.get(button, f"unknown({button})")
         event_type = "release" if is_release else "press"
 
-        logger.debug(
-            "Mouse event [X10]: button=%s(%d) x=%d y=%d event=%s raw_byte=%d",
-            btn_name, button, x, y, event_type, button_byte,
-        )
+        # logger.debug(
+        #     "Mouse event [X10]: button=%s(%d) x=%d y=%d event=%s raw_byte=%d",
+        #     btn_name, button, x, y, event_type, button_byte,
+        # )
 
         return {
             "button": button,
@@ -233,7 +233,7 @@ class MouseControlsHandler:
                 if self.protocol == MouseProtocol.SGR:
                     result = self._parse_sgr_mouse(buf_str)
                     if result:
-                        logger.debug("Mouse event parsed: %s", result)
+                        # logger.debug("Mouse event parsed: %s", result)
                         self._event_queue.put(result)
                         buf = b""
                         continue
@@ -242,7 +242,7 @@ class MouseControlsHandler:
                 if len(buf) >= 6:
                     result = self._parse_x10_mouse(buf_str)
                     if result:
-                        logger.debug("Mouse event parsed (X10): %s", result)
+                        # logger.debug("Mouse event parsed (X10): %s", result)
                         self._event_queue.put(result)
                         buf = b""
                         continue

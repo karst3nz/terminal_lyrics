@@ -83,7 +83,7 @@ class AppConfig:
     ingest_enabled: bool = True
     ingest_host: str = "127.0.0.1"
     ingest_port: int = 7777
-    ingest_wait_timeout_s: float = 15.0
+    ingest_wait_timeout_s: float = 5.0
 
 
 def load_config() -> AppConfig:
@@ -116,7 +116,7 @@ def load_config() -> AppConfig:
     )
     ingest_host = os.getenv("TERMINAL_LYRICS_INGEST_HOST", "127.0.0.1").strip() or "127.0.0.1"
     ingest_port = int(os.getenv("TERMINAL_LYRICS_INGEST_PORT", "7777"))
-    ingest_wait_timeout_s = float(os.getenv("TERMINAL_LYRICS_INGEST_WAIT_S", "15"))
+    ingest_wait_timeout_s = float(os.getenv("TERMINAL_LYRICS_INGEST_WAIT_S", "5"))
 
     return AppConfig(
         data_dir=data_dir,

@@ -109,7 +109,7 @@ class LyricsService:
                     )
                 )
             else:
-                logger.info("Unknown source '%s' in config, skipping", s)
+                logger.debug("Unknown source '%s' in config, skipping", s)
         return out
 
     async def _postcheck_placeholder_to_lrclib(
@@ -128,14 +128,12 @@ class LyricsService:
         if not _needs_lrclib_fallback(lrc_text):
             return LyricsResponse(lrc_text=lrc_text, source=source, has_lyrics=True)
 
-        logger.info(
+        logger.debug(
             "Post-check: trivial lyrics (placeholder/…), LRCLib search for %s", track.display
         )
         resolved = await self._lrclib_best_lyrics_from_search(track)
         if resolved:
-            await self.cache.set(
-                key, has_lyrics=True, lrc_text=resolved, source="lrclib_search"
-            )
+            await self.cache.set(key, has_lyrics=True, lrc_text=resolved, source="lrclib_search")
             return LyricsResponse(lrc_text=resolved, source="lrclib_search", has_lyrics=True)
         return LyricsResponse(lrc_text=lrc_text, source=source, has_lyrics=True)
 
@@ -158,10 +156,32 @@ class LyricsService:
 
     async def get_lyrics(self, track: TrackKey) -> LyricsResponse:
         key = CacheKey(artist=track.artist, title=track.title, album=track.album)
+
+        # First check ingest for real-time lyrics (prioritize over cache)
+        if self._ingest_store is not None:
+            ingest_key = CacheKey(artist=track.artist, title=track.title, album=track.album or "")
+            logger.debug("Checking ingest for %s", track.display)
+            ingested = await self._ingest_store.wait_for_lyrics(
+                ingest_key, self.cfg.ingest_wait_timeout_s
+            )
+            if ingested:
+                logger.debug("Using ingested lyrics for %s", track.display)
+                if _needs_lrclib_fallback(ingested):
+                    return await self._postcheck_placeholder_to_lrclib(
+                        track, key, ingested, "local_ingest"
+                    )
+                await self.cache.set(key, has_lyrics=True, lrc_text=ingested, source="local_ingest")
+                return await self._postcheck_placeholder_to_lrclib(
+                    track, key, ingested, "local_ingest"
+                )
+
+        # Then check cache
         cached_text, cached_has, cached_source = await self.cache.get(key)
         if cached_has is True and cached_text is not None:
             if _needs_lrclib_fallback(cached_text):
-                logger.info("Кэш: trivial lyrics (placeholder/…), LRCLib search для %s", track.display)
+                logger.debug(
+                    "Кэш: trivial lyrics (placeholder/…), LRCLib search для %s", track.display
+                )
                 resolved = await self._lrclib_best_lyrics_from_search(track)
                 if resolved:
                     await self.cache.set(
@@ -170,7 +190,7 @@ class LyricsService:
                     return LyricsResponse(
                         lrc_text=resolved, source="lrclib_search", has_lyrics=True
                     )
-                # LRCLib не помог — продолжаем ingest / источники / поиск ниже
+                # LRCLib не помог — продолжаем источники / поиск ниже
             else:
                 return LyricsResponse(
                     lrc_text=cached_text,
@@ -180,25 +200,6 @@ class LyricsService:
         # При has_lyrics=False в кэше — всё равно проверяем источники (лирики могли появиться)
         if cached_has is False:
             logger.debug("Кэш: has_lyrics=0 для %s, проверяем источники", track.display)
-
-        if self._ingest_store is not None:
-            ingest_key = CacheKey(
-                artist=track.artist, title=track.title, album=track.album or ""
-            )
-            ingested = await self._ingest_store.wait_for_lyrics(
-                ingest_key, self.cfg.ingest_wait_timeout_s
-            )
-            if ingested:
-                if _needs_lrclib_fallback(ingested):
-                    return await self._postcheck_placeholder_to_lrclib(
-                        track, key, ingested, "local_ingest"
-                    )
-                await self.cache.set(
-                    key, has_lyrics=True, lrc_text=ingested, source="local_ingest"
-                )
-                return await self._postcheck_placeholder_to_lrclib(
-                    track, key, ingested, "local_ingest"
-                )
 
         # Fetch sources in order; if any says "definitive_not_found", we still try others
         # (because some sources may have synced lyrics while others don't).
@@ -214,10 +215,12 @@ class LyricsService:
         # (только если есть LrcLibSource)
         lrclib_source = next((src for src in self.sources if isinstance(src, LrcLibSource)), None)
         if lrclib_source:
-            logger.info("Точное совпадение не найдено, пробуем поиск для %s", track.display)
+            logger.debug("Точное совпадение не найдено, пробуем поиск для %s", track.display)
             lrc_text = await self._lrclib_best_lyrics_from_search(track)
             if lrc_text:
-                await self.cache.set(key, has_lyrics=True, lrc_text=lrc_text, source="lrclib_search")
+                await self.cache.set(
+                    key, has_lyrics=True, lrc_text=lrc_text, source="lrclib_search"
+                )
                 return await self._postcheck_placeholder_to_lrclib(
                     track, key, lrc_text, "lrclib_search"
                 )
@@ -240,7 +243,9 @@ class LyricsService:
             seen_ids: set[int | None] = set()
             for artist in artists:
                 sub_query = f"{artist} {track.title}".strip()
-                sub_results = await self.search(q=sub_query, track_name=track.title, artist_name=artist)
+                sub_results = await self.search(
+                    q=sub_query, track_name=track.title, artist_name=artist
+                )
                 for r in sub_results:
                     if r.id not in seen_ids:
                         seen_ids.add(r.id)
@@ -311,7 +316,9 @@ class LyricsService:
             return None
 
         # Используем найденные artist/title для обычного fetch
-        track = TrackKey(artist=result.artist_name, title=result.track_name, album=result.album_name)
+        track = TrackKey(
+            artist=result.artist_name, title=result.track_name, album=result.album_name
+        )
         for src in self.sources:
             if isinstance(src, LrcLibSource):
                 fetch_res = await src.fetch(track)

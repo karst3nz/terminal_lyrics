@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Terminal Lyrics WebSocket Test</title>
+    <style>
+        body { font-family: monospace; margin: 20px; }
+        #messages { border: 1px solid #ccc; height: 300px; overflow-y: auto; padding: 10px; background: #f9f9f9; }
+        input, button { margin: 5px; padding: 5px; }
+        .message { margin: 5px 0; }
+        .lyrics-form { margin: 20px 0; padding: 10px; border: 1px solid #ddd; }
+    </style>
+</head>
+<body>
+    <h1>Terminal Lyrics WebSocket Test</h1>
+    <p><strong>Note:</strong> Lyrics are now sent via WebSocket connection, not HTTP POST.</p>
+
+    <div id="connection-status">Not connected</div>
+
+    <button id="connect-btn">Connect to WebSocket</button>
+    <button id="disconnect-btn" disabled>Disconnect</button>
+
+    <h2>Messages from server:</h2>
+    <div id="messages"></div>
+
+    <h2>Test Lyrics Ingestion (via WebSocket):</h2>
+    <div class="lyrics-form">
+        <input type="text" id="artist" placeholder="Artist" value="Test Artist"><br>
+        <input type="text" id="title" placeholder="Title" value="Test Song"><br>
+        <textarea id="lyrics" placeholder="Lyrics" rows="4">[00:00.00] This is test lyrics
+[00:05.00] WebSocket notification test
+[00:10.00] Real-time updates work!</textarea><br>
+        <button id="send-lyrics-btn">Send Lyrics via HTTP</button>
+    </div>
+
+    <script>
+        let ws = null;
+        const messagesDiv = document.getElementById('messages');
+        const connectBtn = document.getElementById('connect-btn');
+        const disconnectBtn = document.getElementById('disconnect-btn');
+        const statusDiv = document.getElementById('connection-status');
+        const sendLyricsBtn = document.getElementById('send-lyrics-btn');
+
+        function addMessage(message, type = 'info') {
+            const div = document.createElement('div');
+            div.className = `message ${type}`;
+            div.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            messagesDiv.appendChild(div);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        connectBtn.onclick = function() {
+            if (ws) {
+                ws.close();
+            }
+
+            // WebSocket server port
+            const port = 7777; // Default WebSocket port
+            ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+
+            ws.onopen = function() {
+                statusDiv.textContent = 'Connected';
+                statusDiv.style.color = 'green';
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+                addMessage('WebSocket connected', 'success');
+            };
+
+            ws.onmessage = function(event) {
+                try {
+                    const data = JSON.parse(event.data);
+                    addMessage(`Received: ${JSON.stringify(data, null, 2)}`, 'received');
+                } catch (e) {
+                    addMessage(`Received: ${event.data}`, 'received');
+                }
+            };
+
+            ws.onclose = function() {
+                statusDiv.textContent = 'Disconnected';
+                statusDiv.style.color = 'red';
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+                addMessage('WebSocket disconnected', 'warning');
+                ws = null;
+            };
+
+            ws.onerror = function(error) {
+                addMessage(`WebSocket error: ${error}`, 'error');
+            };
+        };
+
+        disconnectBtn.onclick = function() {
+            if (ws) {
+                ws.close();
+            }
+        };
+
+        sendLyricsBtn.onclick = function() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                alert('WebSocket not connected. Please connect first.');
+                return;
+            }
+
+            const artist = document.getElementById('artist').value;
+            const title = document.getElementById('title').value;
+            const lyrics = document.getElementById('lyrics').value;
+
+            if (!lyrics) {
+                alert('Please fill in lyrics');
+                return;
+            }
+
+            const message = {
+                type: "send_lyrics",
+                artist: artist || undefined,
+                title: title || undefined,
+                lyrics: lyrics
+            };
+
+            // Remove undefined fields
+            Object.keys(message).forEach(key => {
+                if (message[key] === undefined) {
+                    delete message[key];
+                }
+            });
+
+            ws.send(JSON.stringify(message));
+            addMessage(`Sent via WebSocket: ${JSON.stringify(message)}`, 'sent');
+        };
+    </script>
+</body>
+</html>

@@ -23,6 +23,7 @@ from terminal_lyrics.lrc.export import export_json, export_lrc, export_srt
 from terminal_lyrics.lrc.parse import parse_lrc_with_stats
 from terminal_lyrics.mpris import async_dbus as mpris_async
 from terminal_lyrics.sources.service import LyricsService
+from terminal_lyrics.sources.local_ingest import start_ingest_server_async
 from terminal_lyrics.render.themes import ThemeManager
 from terminal_lyrics.tui_config import run_setup_tui
 
@@ -398,7 +399,9 @@ def config(
         typer.echo(f"Center text: {'enabled' if cfg.visual.center_text else 'disabled'}")
         typer.echo(f"Animations: {'enabled' if cfg.visual.enable_animations else 'disabled'}")
         typer.echo(f"Mouse controls: {'enabled' if cfg.enable_mouse else 'disabled'}")
-        typer.echo(f"Media control buttons: {'enabled' if cfg.enable_media_controls else 'disabled'}")
+        typer.echo(
+            f"Media control buttons: {'enabled' if cfg.enable_media_controls else 'disabled'}"
+        )
 
 
 @app.command()
@@ -492,6 +495,43 @@ def wizard():
     save_input_config(enable_mouse, enable_media_controls)
     set_lang(lang)
     typer.echo(t("wizard_saved"))
+
+
+@app.command()
+def ws_test(
+    host: str = typer.Option("127.0.0.1", "--host", help="Server host (default: 127.0.0.1)"),
+    port: int = typer.Option(7777, "--port", help="Server port (default: 7777)"),
+    debug: bool = typer.Option(False, "--debug", help="Enable debug logging"),
+):
+    """Start WebSocket test server for lyrics ingestion."""
+    setup_logging(debug, log_to_file=False)
+
+    async def run_server():
+        try:
+            store, runner, site = await start_ingest_server_async(host, port)
+            typer.echo(
+                f"WebSocket test server started on ws://{host}:{site._server.sockets[0].getsockname()[1]}/ws"
+            )
+            typer.echo("HTTP endpoints available:")
+            typer.echo(f"  POST http://{host}:{site._server.sockets[0].getsockname()[1]}/lyrics")
+            typer.echo(f"  GET  http://{host}:{site._server.sockets[0].getsockname()[1]}/health")
+            typer.echo("\nPress Ctrl+C to stop the server")
+
+            # Keep the server running
+            try:
+                while True:
+                    await asyncio.sleep(1)
+            except KeyboardInterrupt:
+                typer.echo("\nShutting down server...")
+                await site.stop()
+                await runner.cleanup()
+                typer.echo("Server stopped")
+
+        except Exception as e:
+            typer.echo(f"Failed to start server: {e}", err=True)
+            raise typer.Exit(code=1)
+
+    asyncio.run(run_server())
 
 
 def main() -> None:

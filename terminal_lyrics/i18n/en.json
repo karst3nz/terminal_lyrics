@@ -10,6 +10,7 @@
   "plain": "Plain",
   "instrumental": " [instrumental]",
   "cache_cleared": "Cache cleared: {path}",
+  "lyrics_updated_ws": "Lyrics updated from WebSocket",
   "use_clear_to_clear": "Use --clear to clear the cache",
   "search_query_required": "Error: At least one of --query or --track must be provided",
   "no_results_found": "No results found",

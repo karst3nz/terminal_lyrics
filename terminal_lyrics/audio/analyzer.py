@@ -105,7 +105,7 @@ class AudioAnalyzer:
                             or source.description == self.device_name
                         ):
                             monitor_source = source.name
-                            logger.info(
+                            logger.debug(
                                 "Found requested device: %s (%s)",
                                 source.description,
                                 source.name,
@@ -116,7 +116,7 @@ class AudioAnalyzer:
                     for source in sources:
                         if ".monitor" in source.name or "monitor" in source.description.lower():
                             monitor_source = source.name
-                            logger.info(
+                            logger.debug(
                                 "Found monitor source: %s (%s)",
                                 source.description,
                                 source.name,
@@ -132,7 +132,7 @@ class AudioAnalyzer:
                 self.audio_backend = "pulsectl"
                 self.audio_available = True
                 pulse.close()
-                logger.info("Using pulsectl for audio capture (PulseAudio/PipeWire)")
+                logger.debug("Using pulsectl for audio capture (PulseAudio/PipeWire)")
                 return True
 
             except Exception as e:
@@ -160,7 +160,7 @@ class AudioAnalyzer:
                     for i, dev in enumerate(devices):
                         if dev["name"] == self.device_name and dev["max_input_channels"] > 0:
                             device_index = i
-                            logger.info("Found requested device: %s", dev["name"])
+                            logger.debug("Found requested device: %s", dev["name"])
                             break
 
                 if device_index is None:
@@ -171,7 +171,7 @@ class AudioAnalyzer:
                             and dev["max_input_channels"] > 0
                         ):
                             device_index = i
-                            logger.info("Found monitor device: %s", dev["name"])
+                            logger.debug("Found monitor device: %s", dev["name"])
                             break
 
                 if device_index is not None:
@@ -183,7 +183,7 @@ class AudioAnalyzer:
 
             self.audio_backend = "sounddevice"
             self.audio_available = True
-            logger.info("Using sounddevice for audio capture")
+            logger.debug("Using sounddevice for audio capture")
             return True
 
         except ImportError:
@@ -197,7 +197,7 @@ class AudioAnalyzer:
 
             self.audio_backend = "pyaudio"
             self.audio_available = True
-            logger.info("Using pyaudio for audio capture")
+            logger.debug("Using pyaudio for audio capture")
             return True
 
         except ImportError:
@@ -335,7 +335,7 @@ class AudioAnalyzer:
             "--latency-msec",
             "10",
         ]
-        logger.info("Running parec: %s", " ".join(cmd))
+        logger.debug("Running parec: %s", " ".join(cmd))
 
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -420,7 +420,7 @@ class AudioAnalyzer:
                 for i, dev in enumerate(devices):
                     if dev["name"] == self.device_name and dev["max_input_channels"] > 0:
                         device_to_use = i
-                        logger.info("Using configured device: %s", dev["name"])
+                        logger.debug("Using configured device: %s", dev["name"])
                         break
             except Exception as e:
                 logger.debug("Could not find configured device: %s", e)

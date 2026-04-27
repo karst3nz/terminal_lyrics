@@ -10,6 +10,7 @@
   "plain": "Обычный",
   "instrumental": " [инструментал]",
   "cache_cleared": "Кэш очищен: {path}",
+  "lyrics_updated_ws": "Текст обновлен из WebSocket",
   "use_clear_to_clear": "Используйте --clear для очистки кэша",
   "search_query_required": "Ошибка: необходимо указать --query или --track",
   "no_results_found": "Нет результатов",

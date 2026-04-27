@@ -19,7 +19,13 @@ from terminal_lyrics.render.ansi import (
     RenderOptions,
     media_controls_layout,
 )
-from terminal_lyrics.render.layout import ICON_PAUSED, ICON_PLAYING, _display_width, format_time, wrap_text
+from terminal_lyrics.render.layout import (
+    ICON_PAUSED,
+    ICON_PLAYING,
+    _display_width,
+    format_time,
+    wrap_text,
+)
 from terminal_lyrics.sources.attribution import format_lyrics_source_footer
 from terminal_lyrics.sources.service import LyricsService
 from terminal_lyrics.sources.types import TrackKey
@@ -113,7 +119,9 @@ def _compute_layout_info(
     body_rows = max(rows - header_lines - footer_lines - 2, 1)
     lyric_body_rows = max(0, body_rows - lyrics_footer_lines)
     lyrics_row_start = top_offset + (metadata_block_lines if options.show_metadata else 0)
-    lyrics_row_end = lyrics_row_start + lyric_body_rows - 1 if lyric_body_rows > 0 else lyrics_row_start - 1
+    lyrics_row_end = (
+        lyrics_row_start + lyric_body_rows - 1 if lyric_body_rows > 0 else lyrics_row_start - 1
+    )
 
     return {
         "title_row": title_row,
@@ -283,6 +291,20 @@ async def watch(cfg: AppConfig, *, preferred_player: str | None, debug: bool) ->
             mouse_handler = None
     else:
         logger.debug("Mouse support disabled in config")
+
+    # Setup lyrics update callback for WebSocket ingest
+    lyrics_update_event = asyncio.Event()
+    new_lyrics_key = None
+    new_lyrics_text = None
+
+    def lyrics_callback(key, text):
+        nonlocal new_lyrics_key, new_lyrics_text
+        new_lyrics_key = key
+        new_lyrics_text = text
+        lyrics_update_event.set()
+
+    if ingest_store is not None:
+        ingest_store._lyrics_callback = lyrics_callback
 
     media_controls_enabled = cfg.enable_media_controls
 
@@ -455,9 +477,7 @@ async def watch(cfg: AppConfig, *, preferred_player: str | None, debug: bool) ->
                     cols,
                     rows,
                     render_options,
-                    has_progress_line=bool(
-                        render_options.show_progress_bar and ti.length_ms > 0
-                    ),
+                    has_progress_line=bool(render_options.show_progress_bar and ti.length_ms > 0),
                     lyrics_footer_lines=1 if lyrics_source_line else 0,
                 )
                 # Drain queued events each tick so press/release pairs don't "stall" controls.
@@ -581,13 +601,17 @@ async def watch(cfg: AppConfig, *, preferred_player: str | None, debug: bool) ->
                                 and bottom_visualizer_end is not None
                                 and bottom_visualizer_start <= y <= bottom_visualizer_end
                             )
-                            if render_options.show_visualizer and (in_top_visualizer or in_bottom_visualizer):
+                            if render_options.show_visualizer and (
+                                in_top_visualizer or in_bottom_visualizer
+                            ):
                                 new_style = _next_visualizer_style(render_options.visualizer_style)
                                 render_options.visualizer_style = new_style
                                 if renderer.visualizer is not None:
                                     renderer.visualizer.style = new_style
                                 try:
-                                    save_visual_config(replace(cfg.visual, visualizer_style=new_style))
+                                    save_visual_config(
+                                        replace(cfg.visual, visualizer_style=new_style)
+                                    )
                                     logger.debug("Visualizer style changed by click: %s", new_style)
                                     status_notice = f"Visualizer: {new_style}"
                                     status_notice_until = time.monotonic() + 2.0
@@ -619,9 +643,7 @@ async def watch(cfg: AppConfig, *, preferred_player: str | None, debug: bool) ->
                                     if 0 <= target_line_idx < len(timed_line_times_ms):
                                         target_ms = timed_line_times_ms[target_line_idx]
                                         try:
-                                            await mpris_async.seek_ms(
-                                                active_player_name, target_ms
-                                            )
+                                            await mpris_async.seek_ms(active_player_name, target_ms)
                                             lyrics_scroll_offset = 0
                                             last_scroll_action_at = None
                                             click_highlight_idx = target_line_idx
@@ -629,28 +651,60 @@ async def watch(cfg: AppConfig, *, preferred_player: str | None, debug: bool) ->
                                         except Exception:
                                             logger.exception("Failed to seek from lyric line click")
 
-            # Restore default auto-follow view after wheel inactivity (smoothly)
+             # Restore default auto-follow view after wheel inactivity (smoothly)
             if (
-                hover_highlight_idx is not None
-                and hover_highlight_since is not None
-                and time.monotonic() - hover_highlight_since >= 2.0
-            ):
-                hover_highlight_idx = None
-                hover_highlight_since = None
+                 hover_highlight_idx is not None
+                 and hover_highlight_since is not None
+                 and time.monotonic() - hover_highlight_since >= 2.0
+             ):
+                 hover_highlight_idx = None
+                 hover_highlight_since = None
 
             if (
-                lyrics_scroll_offset != 0
-                and last_scroll_action_at is not None
-                and time.monotonic() - last_scroll_action_at >= 5.0
-            ):
-                # Easing: faster far from target, slower near zero.
-                step = max(1, math.ceil(abs(lyrics_scroll_offset) * 0.25))
-                if lyrics_scroll_offset > 0:
-                    lyrics_scroll_offset = max(0, lyrics_scroll_offset - step)
-                else:
-                    lyrics_scroll_offset = min(0, lyrics_scroll_offset + step)
-                if lyrics_scroll_offset == 0:
-                    last_scroll_action_at = None
+                 lyrics_scroll_offset != 0
+                 and last_scroll_action_at is not None
+                 and time.monotonic() - last_scroll_action_at >= 5.0
+             ):
+                 # Easing: faster far from target, slower near zero.
+                 step = max(1, math.ceil(abs(lyrics_scroll_offset) * 0.25))
+                 if lyrics_scroll_offset > 0:
+                     lyrics_scroll_offset = max(0, lyrics_scroll_offset - step)
+                 else:
+                     lyrics_scroll_offset = min(0, lyrics_scroll_offset + step)
+                 if lyrics_scroll_offset == 0:
+                     last_scroll_action_at = None
+
+             # Check for WebSocket lyrics updates
+            if lyrics_update_event.is_set():
+                 lyrics_update_event.clear()
+                 if (
+                     new_lyrics_key
+                     and new_lyrics_text
+                     and new_lyrics_key.artist == ti.artist
+                     and new_lyrics_key.title == ti.title
+                 ):
+                     # Update lyrics for current track
+                     lyrics_source_line = format_lyrics_source_footer("local_ingest")
+                     doc = parse_lrc(new_lyrics_text)
+                     if doc.events:
+                         tracker = LineTracker.from_events(doc.events)
+                         timed_lines = [e.text for e in doc.events]
+                         timed_line_times_ms = [e.t_ms for e in doc.events]
+                     else:
+                         plain_lines = [ln.rstrip() for ln in new_lyrics_text.splitlines()]
+                         timed_lines = plain_lines
+                         timed_line_times_ms = []
+                         tracker = None
+                     # Reset scroll and highlights
+                     lyrics_scroll_offset = 0
+                     last_scroll_action_at = None
+                     click_highlight_idx = None
+                     click_highlight_until = None
+                     hover_highlight_idx = None
+                     hover_highlight_since = None
+                     status_notice = None
+                     status_notice_until = time.monotonic() + 3.0
+                     logger.debug("Lyrics updated for current track %s from WebSocket", ti.title)
 
             await asyncio.sleep(tick_s)
     finally:
