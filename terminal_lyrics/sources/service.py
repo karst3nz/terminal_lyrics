@@ -171,8 +171,8 @@ class LyricsService:
                         track, key, ingested, "local_ingest"
                     )
                 await self.cache.set(key, has_lyrics=True, lrc_text=ingested, source="local_ingest")
-                return await self._postcheck_placeholder_to_lrclib(
-                    track, key, ingested, "local_ingest"
+                return LyricsResponse(
+                    lrc_text=ingested, source="local_ingest", has_lyrics=True
                 )
 
         # Then check cache
@@ -207,8 +207,8 @@ class LyricsService:
             res = await src.fetch(track)
             if res.lrc_text and not _needs_lrclib_fallback(res.lrc_text):
                 await self.cache.set(key, has_lyrics=True, lrc_text=res.lrc_text, source=res.source)
-                return await self._postcheck_placeholder_to_lrclib(
-                    track, key, res.lrc_text, res.source
+                return LyricsResponse(
+                    lrc_text=res.lrc_text, source=res.source, has_lyrics=True
                 )
 
         # Если точного совпадения нет, пробуем автоматический поиск через search API
@@ -221,8 +221,8 @@ class LyricsService:
                 await self.cache.set(
                     key, has_lyrics=True, lrc_text=lrc_text, source="lrclib_search"
                 )
-                return await self._postcheck_placeholder_to_lrclib(
-                    track, key, lrc_text, "lrclib_search"
+                return LyricsResponse(
+                    lrc_text=lrc_text, source="lrclib_search", has_lyrics=True
                 )
 
         # negative cache to avoid hammering
