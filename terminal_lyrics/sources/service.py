@@ -156,25 +156,6 @@ class LyricsService:
 
     async def get_lyrics(self, track: TrackKey) -> LyricsResponse:
         key = CacheKey(artist=track.artist, title=track.title, album=track.album)
-
-        # First check ingest for real-time lyrics (prioritize over cache)
-        if self._ingest_store is not None:
-            ingest_key = CacheKey(artist=track.artist, title=track.title, album=track.album or "")
-            logger.debug("Checking ingest for %s", track.display)
-            ingested = await self._ingest_store.wait_for_lyrics(
-                ingest_key, self.cfg.ingest_wait_timeout_s
-            )
-            if ingested:
-                logger.debug("Using ingested lyrics for %s", track.display)
-                if _needs_lrclib_fallback(ingested):
-                    return await self._postcheck_placeholder_to_lrclib(
-                        track, key, ingested, "local_ingest"
-                    )
-                await self.cache.set(key, has_lyrics=True, lrc_text=ingested, source="local_ingest")
-                return LyricsResponse(
-                    lrc_text=ingested, source="local_ingest", has_lyrics=True
-                )
-
         # Then check cache
         cached_text, cached_has, cached_source = await self.cache.get(key)
         if cached_has is True and cached_text is not None:
@@ -209,6 +190,24 @@ class LyricsService:
                 await self.cache.set(key, has_lyrics=True, lrc_text=res.lrc_text, source=res.source)
                 return LyricsResponse(
                     lrc_text=res.lrc_text, source=res.source, has_lyrics=True
+                )
+            
+        # Then check ingest for real-time lyrics (prioritize over cache)
+        if self._ingest_store is not None:
+            ingest_key = CacheKey(artist=track.artist, title=track.title, album=track.album or "")
+            logger.debug("Checking ingest for %s", track.display)
+            ingested = await self._ingest_store.wait_for_lyrics(
+                ingest_key, self.cfg.ingest_wait_timeout_s
+            )
+            if ingested:
+                logger.debug("Using ingested lyrics for %s", track.display)
+                if _needs_lrclib_fallback(ingested):
+                    return await self._postcheck_placeholder_to_lrclib(
+                        track, key, ingested, "local_ingest"
+                    )
+                await self.cache.set(key, has_lyrics=True, lrc_text=ingested, source="local_ingest")
+                return LyricsResponse(
+                    lrc_text=ingested, source="local_ingest", has_lyrics=True
                 )
 
         # Если точного совпадения нет, пробуем автоматический поиск через search API
