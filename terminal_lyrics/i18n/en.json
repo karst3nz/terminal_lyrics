@@ -62,6 +62,7 @@
   "wizard_menu_visualizer": "Visualizer",
   "wizard_menu_visualizer_style": "Visualizer Style",
   "wizard_menu_visualizer_motion": "Visualizer dynamics",
+  "wizard_menu_visualizer_bands": "Visualizer bands",
   "visualizer_motion_responsive": "Responsive & fast",
   "visualizer_motion_smooth": "Smooth & calm",
   "wizard_menu_progress_bar": "Progress Bar",

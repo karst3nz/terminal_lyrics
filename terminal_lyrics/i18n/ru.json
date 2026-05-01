@@ -62,6 +62,7 @@
   "wizard_menu_visualizer": "Визуализатор",
   "wizard_menu_visualizer_style": "Стиль визуализатора",
   "wizard_menu_visualizer_motion": "Динамика визуализатора",
+  "wizard_menu_visualizer_bands": "Полосы визуализатора",
   "visualizer_motion_responsive": "Отзывчивый и быстрый",
   "visualizer_motion_smooth": "Плавный и спокойный",
   "wizard_menu_progress_bar": "Прогресс-бар",

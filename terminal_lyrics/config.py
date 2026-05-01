@@ -30,6 +30,7 @@ class VisualConfig:
     visualizer_style: Literal["equalizer", "waveform", "blocks", "dots", "centered"] = "equalizer"
     visualizer_motion: Literal["responsive", "smooth"] = "responsive"
     visualizer_position: Literal["top", "bottom", "off"] = "top"
+    visualizer_bands: int = 20
     center_text: bool = True
     enable_animations: bool = True
     enable_gradient: bool = True
@@ -173,6 +174,7 @@ def _load_visual_config(config_dir: Path) -> VisualConfig:
         "visualizer_style": "equalizer",
         "visualizer_motion": "responsive",
         "visualizer_position": "top",
+        "visualizer_bands": 20,
         "center_text": True,
         "enable_animations": True,
         "enable_gradient": True,
@@ -211,6 +213,14 @@ def _load_visual_config(config_dir: Path) -> VisualConfig:
         em = env_motion.strip().lower()
         if em in _valid_viz_motion:
             defaults["visualizer_motion"] = em
+
+    # Validate visualizer_bands (must be between 3 and 50)
+    if "visualizer_bands" in defaults:
+        try:
+            bands = int(defaults["visualizer_bands"])
+            defaults["visualizer_bands"] = max(3, min(50, bands))
+        except (ValueError, TypeError):
+            defaults["visualizer_bands"] = 20
 
     return VisualConfig(**defaults)
 
@@ -310,6 +320,7 @@ def save_visual_config(visual: VisualConfig) -> None:
         "visualizer_style": visual.visualizer_style,
         "visualizer_motion": visual.visualizer_motion,
         "visualizer_position": visual.visualizer_position,
+        "visualizer_bands": visual.visualizer_bands,
         "center_text": visual.center_text,
         "enable_animations": visual.enable_animations,
         "enable_gradient": visual.enable_gradient,

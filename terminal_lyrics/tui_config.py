@@ -43,6 +43,7 @@ class WizardState:
     show_visualizer: bool
     visualizer_style: VisualizerStyle
     visualizer_motion: VisualizerMotion
+    visualizer_bands: int
     center_text: bool
     enable_animations: bool
     enable_mouse: bool
@@ -60,6 +61,7 @@ class WizardState:
             show_visualizer=cfg.visual.show_visualizer,
             visualizer_style=cfg.visual.visualizer_style,
             visualizer_motion=cfg.visual.visualizer_motion,
+            visualizer_bands=cfg.visual.visualizer_bands,
             center_text=cfg.visual.center_text,
             enable_animations=cfg.visual.enable_animations,
             enable_mouse=cfg.enable_mouse,
@@ -78,6 +80,7 @@ class WizardState:
             visualizer_style=self.visualizer_style,
             visualizer_motion=self.visualizer_motion,
             visualizer_position=current_visual.visualizer_position,
+            visualizer_bands=self.visualizer_bands,
             center_text=self.center_text,
             enable_animations=self.enable_animations,
             enable_gradient=current_visual.enable_gradient,
@@ -166,7 +169,12 @@ def _apply_change(item: MenuItem, state: WizardState, direction: int) -> None:
         return
     if item.kind == "cycle":
         current = str(getattr(state, item.key))
-        setattr(state, item.key, _cycle_value(item.values, current, direction))
+        new_value = _cycle_value(item.values, current, direction)
+        # Convert to int for visualizer_bands
+        if item.key == "visualizer_bands":
+            setattr(state, item.key, int(new_value))
+        else:
+            setattr(state, item.key, new_value)
 
 
 def _fit_text(text: str, max_len: int) -> str:
@@ -187,7 +195,7 @@ def _preview_lines(theme: ANSITheme, state: WizardState, width: int, now_s: floa
     if state.show_visualizer:
         visualizer = MusicVisualizer(
             # Keep preview parameters aligned with EnhancedRenderer.
-            width=20,
+            width=state.visualizer_bands,
             height=5,
             style=state.visualizer_style,
             use_real_audio=False,
@@ -274,6 +282,12 @@ def run_setup_tui(cfg, *, theme_manager: ThemeManager) -> tuple[str, VisualConfi
             "wizard_menu_visualizer_motion",
             "cycle",
             ("responsive", "smooth"),
+        ),
+        MenuItem(
+            "visualizer_bands",
+            "wizard_menu_visualizer_bands",
+            "cycle",
+            tuple(str(i) for i in range(3, 51)),
         ),
         MenuItem("show_progress_bar", "wizard_menu_progress_bar", "toggle", on_label=on_label, off_label=off_label),
         MenuItem("center_text", "wizard_menu_center_text", "toggle", on_label=on_label, off_label=off_label),

@@ -75,6 +75,7 @@ class RenderOptions:
     show_visualizer: bool = False
     visualizer_style: str = "spectrum"
     visualizer_position: str = "top"
+    visualizer_bands: int = 20
     center_text: bool = True
     enable_animations: bool = True
     enable_gradient: bool = True
@@ -114,7 +115,7 @@ class EnhancedRenderer:
         # Visualizer
         if self.options.show_visualizer:
             self.visualizer = MusicVisualizer(
-                width=20,
+                width=self.options.visualizer_bands,
                 height=3,
                 style=self.options.visualizer_style,
                 use_real_audio=self.options.use_real_audio,

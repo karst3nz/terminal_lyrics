@@ -245,6 +245,11 @@ def config(
         "--visualizer-motion",
         help="Visualizer dynamics: responsive (tight, punchy) or smooth (calm, soft)",
     ),
+    visualizer_bands: int | None = typer.Option(
+        None,
+        "--visualizer-bands",
+        help="Number of visualizer bands (3-50, default: 20)",
+    ),
     center_text: bool | None = typer.Option(
         None, "--center-text/--no-center-text", help="Center lyrics text"
     ),
@@ -295,6 +300,7 @@ def config(
         "visualizer_style": cfg.visual.visualizer_style,
         "visualizer_motion": cfg.visual.visualizer_motion,
         "visualizer_position": cfg.visual.visualizer_position,
+        "visualizer_bands": cfg.visual.visualizer_bands,
         "center_text": cfg.visual.center_text,
         "enable_animations": cfg.visual.enable_animations,
         "enable_gradient": cfg.visual.enable_gradient,
@@ -348,6 +354,17 @@ def config(
         visual_dict["visualizer_motion"] = vm
         visual_changed = True
         typer.echo(f"Visualizer motion: {vm}")
+
+    if visualizer_bands is not None:
+        if not 3 <= visualizer_bands <= 50:
+            typer.echo(
+                "Invalid visualizer bands. Must be between 3 and 50",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        visual_dict["visualizer_bands"] = visualizer_bands
+        visual_changed = True
+        typer.echo(f"Visualizer bands: {visualizer_bands}")
 
     if center_text is not None:
         visual_dict["center_text"] = center_text

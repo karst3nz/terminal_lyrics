@@ -254,6 +254,7 @@ async def watch(cfg: AppConfig, *, preferred_player: str | None, debug: bool) ->
         visualizer_style=cfg.visual.visualizer_style,
         visualizer_motion=cfg.visual.visualizer_motion,
         visualizer_position=cfg.visual.visualizer_position,
+        visualizer_bands=cfg.visual.visualizer_bands,
         center_text=cfg.visual.center_text,
         enable_animations=cfg.visual.enable_animations,
         enable_gradient=cfg.visual.enable_gradient,
