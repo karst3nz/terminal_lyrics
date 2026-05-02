@@ -284,6 +284,9 @@ async def _handle_websocket(request: web.Request) -> web.WebSocketResponse:
     store.add_ws_connection(ws)
     logger.debug("WebSocket connection established from %s", request.remote)
 
+    # Send lyrics request after successful connection
+    await ws.send_json({"type": "lyrics_request"})
+
     try:
         async for msg in ws:
             if msg.type == web.WSMsgType.ERROR:
