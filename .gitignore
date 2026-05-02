@@ -5,3 +5,5 @@ build/
 .pytest_cache/
 .ruff_cache
 test_*.py
+server.log
+server.pid

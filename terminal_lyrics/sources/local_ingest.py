@@ -9,9 +9,11 @@ from typing import Set
 
 from aiohttp import web
 
+from build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.build.lib.terminal_lyrics import lrc
 from terminal_lyrics.cache.sqlite import CacheKey
 
 logger = logging.getLogger(__name__)
+last_accepted_lyrics = ''
 
 _CORS_BASE = (
     ("Access-Control-Allow-Origin", "*"),
@@ -73,18 +75,34 @@ class LocalLyricsStore:
         async with self._cond:
             self._lyrics[self.key_tuple(key)] = text
             self._cond.notify_all()
-        logger.debug("Local ingest: stored lyrics for %s - %s", key.artist, key.title)
-        if self._lyrics_callback:
-            self._lyrics_callback(key, text)
-        await self._notify_ws_clients(
-            {
-                "type": "lyrics_added",
-                "artist": key.artist,
-                "title": key.title,
-                "album": key.album,
-                "lyrics_length": len(text),
-            }
-        )
+        if check_lyrics_for_placeholder(text):
+            logger.debug(
+                "Local ingest: stored lyrics for %s - %s contain placeholder, skipping callback",
+                key.artist,
+                key.title,
+            )
+            await self._notify_ws_clients(
+                {
+                    "type": "lyrics_rejected_placeholder",
+                    "artist": key.artist,
+                    "title": key.title,
+                    "album": key.album,
+                    "lyrics_length": len(text),
+                }
+            )
+        else:  
+            logger.debug("Local ingest: stored lyrics for %s - %s", key.artist, key.title)
+            if self._lyrics_callback:
+                self._lyrics_callback(key, text)
+            await self._notify_ws_clients(
+                {
+                    "type": "lyrics_added",
+                    "artist": key.artist,
+                    "title": key.title,
+                    "album": key.album,
+                    "lyrics_length": len(text),
+                }
+            )
 
     async def set_unbound_lyrics(self, text: str) -> None:
         """Lyrics without artist/title — matched to whoever is waiting (e.g. browser extension)."""
@@ -185,10 +203,17 @@ async def _handle_head_health(request: web.Request) -> web.Response:
     )
 
 
+def check_lyrics_for_placeholder(lrc_text: str) -> bool:
+    if any(placeholder in lrc_text for placeholder in ["[00:00.00] ...\n", "[00:00.00] ..."]):
+        return True
+    return False
+
+
 async def _handle_ws_message(
     ws: web.WebSocketResponse, store: LocalLyricsStore, data: dict, remote: str
 ) -> None:
     """Handle incoming WebSocket messages."""
+    global last_accepted_lyrics
     msg_type = data.get("type")
 
     if msg_type == "send_lyrics":
@@ -238,7 +263,6 @@ async def _handle_ws_message(
                 str(artist).strip(), str(title).strip(), str(album or "").strip()
             )
             if key:
-                await store.set_lyrics(key, lrc_text.strip())
                 logger.debug(
                     "WebSocket lyrics received from %s: accepted lyrics for %s - %s (%d chars)",
                     remote,
@@ -254,6 +278,20 @@ async def _handle_ws_message(
                         "title": key.title,
                     }
                 )
+                if last_accepted_lyrics and lrc_text.strip() == last_accepted_lyrics and check_lyrics_for_placeholder(lrc_text.strip()):
+                    logger.debug(
+                        "WebSocket lyrics from %s are identical to last accepted lyrics, skipping callback",
+                        remote,
+                    )
+                else:
+                    if check_lyrics_for_placeholder(lrc_text.strip()):
+                        logger.debug(
+                            "WebSocket lyrics from %s contain placeholder, skipping callback",
+                            remote,
+                        )
+                    else:   
+                        await store.set_lyrics(key, lrc_text.strip())
+                        last_accepted_lyrics = lrc_text.strip()
             else:
                 await ws.send_json({"error": "invalid artist/title"})
         else:
@@ -384,6 +422,14 @@ async def _handle_post(request: web.Request) -> web.Response:
             request.rel_url,
         )
         return _json_error(400, "lyrics text required (JSON lyrics / lrc_text / text or body)")
+
+    if check_lyrics_for_placeholder(lrc_text.strip()):
+        logger.warning(
+            "ingest %s POST %s: lyrics contain placeholder, rejecting",
+            request.remote,
+            request.rel_url,
+        )
+        return _json_error(400, "lyrics contain placeholder text, rejected")
 
     if key is not None:
         await store.set_lyrics(key, lrc_text)
