@@ -1,8 +1,0 @@
-2026-04-26 13:54:20,130 [DEBUG] asyncio: Using selector: EpollSelector
-2026-04-26 13:54:20,131 [INFO] terminal_lyrics.sources.local_ingest: Local lyrics ingest server listening on http://127.0.0.1:35873
-WebSocket test server started on ws://127.0.0.1:35873/ws
-HTTP endpoints available:
-  POST http://127.0.0.1:35873/lyrics
-  GET  http://127.0.0.1:35873/health
-
-Press Ctrl+C to stop the server
