@@ -190,11 +190,11 @@ class LyricsService:
                     return await self._postcheck_placeholder_to_lrclib(
                         track, key, res.lrc_text, res.source
                     )  
-            # elif res.lrc_text and not _needs_lrclib_fallback(res.lrc_text):
-            #     await self.cache.set(key, has_lyrics=True, lrc_text=res.lrc_text, source=res.source)
-            #     return LyricsResponse(
-            #         lrc_text=res.lrc_text, source=res.source, has_lyrics=True
-            #     )
+            elif res.lrc_text and not _needs_lrclib_fallback(res.lrc_text):
+                await self.cache.set(key, has_lyrics=True, lrc_text=res.lrc_text, source=res.source)
+                return LyricsResponse(
+                    lrc_text=res.lrc_text, source=res.source, has_lyrics=True
+                )
           
         # Then check ingest for real-time lyrics (prioritize over cache)
         if self._ingest_store is not None:
