@@ -67,6 +67,7 @@ def watch(
     context_lines: int | None = typer.Option(
         None, "--context", help="Lines above/below current line"
     ),
+    no_lrclib: bool = typer.Option(False, "--no_lrclib", help="Disable LRCLIB fetch")
 ):
     """Watch synced lyrics in terminal (tmux/headless friendly)."""
     cfg = load_config()
@@ -80,7 +81,7 @@ def watch(
     setup_logging(debug, log_to_file=log_file)
     raise typer.Exit(
         code=asyncio.run(
-            watch_loop(cfg, preferred_player=player or cfg.preferred_player, debug=debug)
+            watch_loop(cfg, preferred_player=player or cfg.preferred_player, debug=debug, no_lrclib=no_lrclib)
         )
     )
 

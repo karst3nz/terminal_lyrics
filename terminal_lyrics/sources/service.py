@@ -79,6 +79,7 @@ class LyricsService:
         cfg: AppConfig,
         *,
         local_ingest_store: LocalLyricsStore | None = None,
+        no_lrclib: bool
     ):
         self.cfg = cfg
         self.cache = LyricsCache(cfg.cache_db_path)
@@ -86,6 +87,7 @@ class LyricsService:
         self._ingest_store: LocalLyricsStore | None = (
             local_ingest_store if cfg.ingest_enabled else None
         )
+        self.no_lrclib = no_lrclib
 
     @staticmethod
     def _build_sources(cfg: AppConfig) -> list[LyricsSource]:
@@ -139,6 +141,7 @@ class LyricsService:
 
     async def _lrclib_best_lyrics_from_search(self, track: TrackKey) -> str | None:
         """LRCLib search + best match; returns text or None (rejects trivial lyrics)."""
+        if self.no_lrclib is True: return None
         search_results = await self._auto_search_fallback(track)
         if not search_results:
             return None
@@ -184,18 +187,19 @@ class LyricsService:
 
         # Fetch sources in order; if any says "definitive_not_found", we still try others
         # (because some sources may have synced lyrics while others don't).
-        for src in self.sources:
-            res = await src.fetch(track)
-            if _needs_lrclib_fallback(res.lrc_text):
-                    return await self._postcheck_placeholder_to_lrclib(
-                        track, key, res.lrc_text, res.source
-                    )  
-            elif res.lrc_text and not _needs_lrclib_fallback(res.lrc_text):
-                await self.cache.set(key, has_lyrics=True, lrc_text=res.lrc_text, source=res.source)
-                return LyricsResponse(
-                    lrc_text=res.lrc_text, source=res.source, has_lyrics=True
-                )
-          
+        if self.no_lrclib is False:
+            for src in self.sources:
+                res = await src.fetch(track)
+                if _needs_lrclib_fallback(res.lrc_text):
+                        return await self._postcheck_placeholder_to_lrclib(
+                            track, key, res.lrc_text, res.source
+                        )  
+                elif res.lrc_text and not _needs_lrclib_fallback(res.lrc_text):
+                    await self.cache.set(key, has_lyrics=True, lrc_text=res.lrc_text, source=res.source)
+                    return LyricsResponse(
+                        lrc_text=res.lrc_text, source=res.source, has_lyrics=True
+                    )
+        
         # Then check ingest for real-time lyrics (prioritize over cache)
         if self._ingest_store is not None:
             ingest_key = CacheKey(artist=track.artist, title=track.title, album=track.album or "")
@@ -317,7 +321,7 @@ class LyricsService:
         """Получает syncedLyrics для результата поиска через обычный fetch."""
         if not result.has_synced_lyrics:
             return None
-
+        if self.no_lrclib == True: return None
         # Используем найденные artist/title для обычного fetch
         track = TrackKey(
             artist=result.artist_name, title=result.track_name, album=result.album_name
@@ -341,6 +345,7 @@ class LyricsService:
         Поиск лирики через доступные источники.
         Сейчас поддерживается только lrclib.
         """
+        if self.no_lrclib is True: return None
         results: list[SearchResult] = []
         for src in self.sources:
             if isinstance(src, LrcLibSource):

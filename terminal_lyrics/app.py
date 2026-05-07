@@ -204,7 +204,7 @@ def _progress_bar_click_bounds(
     return bar_start_x, bar_end_x
 
 
-async def watch(cfg: AppConfig, *, preferred_player: str | None, debug: bool) -> int:
+async def watch(cfg: AppConfig, *, preferred_player: str | None, debug: bool, no_lrclib: bool) -> int:
     """
     Main watch loop:
     MPRIS -> (track, position) -> lyrics -> parse -> bisect -> render on change.
@@ -241,7 +241,7 @@ async def watch(cfg: AppConfig, *, preferred_player: str | None, debug: bool) ->
             "Lyrics ingest HTTP server is off (TERMINAL_LYRICS_INGEST=0). It is enabled by default."
         )
 
-    svc = LyricsService(cfg, local_ingest_store=ingest_store)
+    svc = LyricsService(cfg, local_ingest_store=ingest_store, no_lrclib=no_lrclib)
 
     # Create render options from config
     render_options = RenderOptions(

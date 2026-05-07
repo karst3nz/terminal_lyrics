@@ -28,7 +28,7 @@ class LrcLibSource(LyricsSource):
             now = time.time()
             if self._last_call_time and now - self._last_call_time < self.min_interval_s:
                 return FetchResult(lrc_text=None, definitive_not_found=False, source=self.name)
-
+            
             params = {
                 "artist_name": track.artist,
                 "track_name": track.title,
@@ -52,14 +52,14 @@ class LrcLibSource(LyricsSource):
                         logger.warning("lrclib error (attempt %s/%s): %s", attempt, self.max_retries, e)
                         if attempt == self.max_retries:
                             return FetchResult(None, False, self.name)
-                        await asyncio.sleep(self.backoff_base_s * attempt)
+                        await asyncio.sleep(self.backoff_base_s)
                     except httpx.HTTPStatusError as e:
                         if e.response.status_code == 404:
                             return FetchResult(None, True, self.name)
                         logger.warning("lrclib error (attempt %s/%s): %s", attempt, self.max_retries, e)
                         if attempt == self.max_retries:
                             return FetchResult(None, False, self.name)
-                        await asyncio.sleep(self.backoff_base_s * attempt)
+                        await asyncio.sleep(self.backoff_base_s)
 
             return FetchResult(None, False, self.name)
 
